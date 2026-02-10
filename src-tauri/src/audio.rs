@@ -1,13 +1,14 @@
 use rodio::{Decoder, OutputStream, Sink, Source};
 use std::io::Cursor;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
 pub enum AudioCommand {
-    Play(Vec<u8>),
+    Play { bytes: Vec<u8>, generation: u64 },
+    PlayFailed { generation: u64 },
     Pause,
     Resume,
     Stop,
@@ -24,11 +25,20 @@ pub struct AudioPlayer {
     /// play request has superseded them (avoids stale downloads overriding the
     /// latest track).
     play_generation: Arc<AtomicU64>,
+    /// Whether playback should currently be running. This is updated immediately
+    /// on pause/resume calls, so delayed downloads can honor the latest intent.
+    desired_playing: Arc<AtomicBool>,
+    /// Generation ID of an in-flight download, or 0 when no download is pending.
+    pending_generation: Arc<AtomicU64>,
 }
 
 impl AudioPlayer {
     pub fn new() -> Self {
         let (sender, receiver) = channel::<AudioCommand>();
+        let desired_playing = Arc::new(AtomicBool::new(false));
+        let pending_generation = Arc::new(AtomicU64::new(0));
+        let desired_playing_for_thread = Arc::clone(&desired_playing);
+        let pending_generation_for_thread = Arc::clone(&pending_generation);
 
         thread::spawn(move || {
             let (_stream, stream_handle) = OutputStream::try_default().unwrap();
@@ -40,17 +50,48 @@ impl AudioPlayer {
 
             loop {
                 match receiver.recv() {
-                    Ok(AudioCommand::Play(bytes)) => {
+                    Ok(AudioCommand::Play { bytes, generation }) => {
+                        if generation != 0
+                            && pending_generation_for_thread.load(Ordering::SeqCst) != generation
+                        {
+                            // A newer play request superseded this one.
+                            continue;
+                        }
+
                         sink.stop();
                         let cursor = Cursor::new(bytes.clone());
                         current_bytes = Some(bytes);
                         if let Ok(source) = Decoder::new(cursor) {
                             sink.append(source);
-                            sink.play();
-                            play_start = Some(Instant::now());
                             accumulated_time = 0.0;
-                            is_paused = false;
+
+                            if desired_playing_for_thread.load(Ordering::SeqCst) {
+                                sink.play();
+                                play_start = Some(Instant::now());
+                                is_paused = false;
+                            } else {
+                                sink.pause();
+                                play_start = None;
+                                is_paused = true;
+                            }
                         }
+
+                        if generation != 0 {
+                            let _ = pending_generation_for_thread.compare_exchange(
+                                generation,
+                                0,
+                                Ordering::SeqCst,
+                                Ordering::SeqCst,
+                            );
+                        }
+                    }
+                    Ok(AudioCommand::PlayFailed { generation }) => {
+                        let _ = pending_generation_for_thread.compare_exchange(
+                            generation,
+                            0,
+                            Ordering::SeqCst,
+                            Ordering::SeqCst,
+                        );
                     }
                     Ok(AudioCommand::Pause) => {
                         if let Some(start) = play_start {
@@ -116,7 +157,9 @@ impl AudioPlayer {
                         let _ = reply.send(pos);
                     }
                     Ok(AudioCommand::IsFinished(reply)) => {
-                        let _ = reply.send(sink.empty());
+                        let has_pending_play =
+                            pending_generation_for_thread.load(Ordering::SeqCst) != 0;
+                        let _ = reply.send(!has_pending_play && sink.empty());
                     }
                     Err(_) => break,
                 }
@@ -126,14 +169,21 @@ impl AudioPlayer {
         Self {
             sender,
             play_generation: Arc::new(AtomicU64::new(0)),
+            desired_playing,
+            pending_generation,
         }
     }
 
     #[allow(dead_code)]
     pub fn play(&self, bytes: Vec<u8>) -> Result<(), String> {
         self.play_generation.fetch_add(1, Ordering::SeqCst);
+        self.desired_playing.store(true, Ordering::SeqCst);
+        self.pending_generation.store(0, Ordering::SeqCst);
         self.sender
-            .send(AudioCommand::Play(bytes))
+            .send(AudioCommand::Play {
+                bytes,
+                generation: 0,
+            })
             .map_err(|e| e.to_string())
     }
 
@@ -144,7 +194,10 @@ impl AudioPlayer {
     pub fn play_url(&self, url: String) -> Result<(), String> {
         let gen = self.play_generation.fetch_add(1, Ordering::SeqCst) + 1;
         let generation = Arc::clone(&self.play_generation);
+        let pending_generation = Arc::clone(&self.pending_generation);
         let sender = self.sender.clone();
+        self.desired_playing.store(true, Ordering::SeqCst);
+        self.pending_generation.store(gen, Ordering::SeqCst);
 
         // Stop current playback right away so the user hears silence instead
         // of the tail of the old track while the new one downloads.
@@ -155,6 +208,9 @@ impl AudioPlayer {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("Failed to fetch stream from '{}': {}", url, e);
+                    if generation.load(Ordering::SeqCst) == gen {
+                        let _ = sender.send(AudioCommand::PlayFailed { generation: gen });
+                    }
                     return;
                 }
             };
@@ -163,6 +219,9 @@ impl AudioPlayer {
                 Ok(b) => b,
                 Err(e) => {
                     eprintln!("Failed to read stream bytes: {}", e);
+                    if generation.load(Ordering::SeqCst) == gen {
+                        let _ = sender.send(AudioCommand::PlayFailed { generation: gen });
+                    }
                     return;
                 }
             };
@@ -172,8 +231,18 @@ impl AudioPlayer {
                 return;
             }
 
-            if let Err(e) = sender.send(AudioCommand::Play(bytes.to_vec())) {
+            if let Err(e) = sender.send(AudioCommand::Play {
+                bytes: bytes.to_vec(),
+                generation: gen,
+            }) {
                 eprintln!("Failed to send Play command: {}", e);
+                // Best-effort cleanup if the player thread is unavailable.
+                let _ = pending_generation.compare_exchange(
+                    gen,
+                    0,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                );
             }
         });
 
@@ -181,18 +250,24 @@ impl AudioPlayer {
     }
 
     pub fn pause(&self) -> Result<(), String> {
+        self.desired_playing.store(false, Ordering::SeqCst);
         self.sender
             .send(AudioCommand::Pause)
             .map_err(|e| e.to_string())
     }
 
     pub fn resume(&self) -> Result<(), String> {
+        self.desired_playing.store(true, Ordering::SeqCst);
         self.sender
             .send(AudioCommand::Resume)
             .map_err(|e| e.to_string())
     }
 
     pub fn stop(&self) -> Result<(), String> {
+        // Invalidate pending downloads so stale Play commands are ignored.
+        self.play_generation.fetch_add(1, Ordering::SeqCst);
+        self.pending_generation.store(0, Ordering::SeqCst);
+        self.desired_playing.store(false, Ordering::SeqCst);
         self.sender
             .send(AudioCommand::Stop)
             .map_err(|e| e.to_string())
