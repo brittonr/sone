@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import Layout from "./components/Layout";
 import Home from "./components/Home";
 import AlbumView from "./components/AlbumView";
@@ -6,6 +7,60 @@ import FavoritesView from "./components/FavoritesView";
 import Login from "./components/Login";
 import { AudioProvider, useAudioContext } from "./contexts/AudioContext";
 import "./App.css";
+
+const ZOOM_KEY = "tide-vibe.zoom.v1";
+const ZOOM_STEP = 0.1;
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2.0;
+
+function useZoom() {
+  const [zoom, setZoom] = useState(() => {
+    try {
+      const saved = localStorage.getItem(ZOOM_KEY);
+      if (saved) {
+        const val = Number(saved);
+        if (!Number.isNaN(val) && val >= ZOOM_MIN && val <= ZOOM_MAX)
+          return val;
+      }
+    } catch {}
+    return 1.0;
+  });
+
+  useEffect(() => {
+    document.documentElement.style.zoom = String(zoom);
+  }, [zoom]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ZOOM_KEY, String(zoom));
+    } catch {}
+  }, [zoom]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (!e.ctrlKey && !e.metaKey) return;
+
+      if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        setZoom((z) =>
+          Math.min(ZOOM_MAX, Math.round((z + ZOOM_STEP) * 100) / 100)
+        );
+      } else if (e.key === "-") {
+        e.preventDefault();
+        setZoom((z) =>
+          Math.max(ZOOM_MIN, Math.round((z - ZOOM_STEP) * 100) / 100)
+        );
+      } else if (e.key === "0") {
+        e.preventDefault();
+        setZoom(1.0);
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+}
 
 function AppContent() {
   const { isAuthenticated, currentView, navigateHome } = useAudioContext();
@@ -44,6 +99,8 @@ function AppContent() {
 }
 
 function App() {
+  useZoom();
+
   return (
     <AudioProvider>
       <AppContent />
