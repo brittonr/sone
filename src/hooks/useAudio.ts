@@ -423,7 +423,20 @@ export function useAudio() {
 
   const resumeTrack = async () => {
     try {
-      await invoke("resume_track");
+      const track = currentTrackRef.current;
+      if (!track) {
+        return;
+      }
+
+      // After app relaunch we restore currentTrack in UI, but the backend has
+      // no decoded audio loaded yet. If the backend is effectively "empty",
+      // re-dispatch the current track instead of sending a no-op resume.
+      const isFinished = await invoke<boolean>("is_track_finished");
+      if (isFinished) {
+        await invoke("play_tidal_track", { trackId: track.id });
+      } else {
+        await invoke("resume_track");
+      }
       setIsPlaying(true);
     } catch (error) {
       console.error("Failed to resume track:", error);
