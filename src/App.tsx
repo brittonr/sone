@@ -8,6 +8,7 @@ import SearchView from "./components/SearchView";
 import ViewAllPage from "./components/ViewAllPage";
 import ArtistPage from "./components/ArtistPage";
 import MixPage from "./components/MixPage";
+import TrackRadioPage from "./components/TrackRadioPage";
 import Login from "./components/Login";
 import { AudioProvider, useAudioContext } from "./contexts/AudioContext";
 import "./App.css";
@@ -116,6 +117,14 @@ function AppContent() {
           <MixPage
             mixId={currentView.mixId}
             mixInfo={currentView.mixInfo}
+            onBack={navigateHome}
+          />
+        );
+      case "trackRadio":
+        return (
+          <TrackRadioPage
+            trackId={currentView.trackId}
+            trackInfo={currentView.trackInfo}
             onBack={navigateHome}
           />
         );

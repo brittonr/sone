@@ -189,32 +189,49 @@ export default function AddToPlaylistMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // Position the menu relative to the anchor
+  // Position the menu relative to the anchor (measure-based).
+  // getBoundingClientRect() returns CSS-pixel values in Tauri's WebKit,
+  // so no zoom compensation is needed here.
   const [position, setPosition] = useState<{ top: number; left: number }>({
-    top: 0,
-    left: 0,
+    top: -9999,
+    left: -9999,
   });
+  const [isPositioned, setIsPositioned] = useState(false);
 
   useEffect(() => {
-    if (anchorRef.current) {
-      const rect = anchorRef.current.getBoundingClientRect();
-      const menuWidth = 320;
-      const menuHeight = 420;
+    const raf = requestAnimationFrame(() => {
+      const menu = menuRef.current;
+      if (!menu || !anchorRef.current) return;
 
-      let top = rect.bottom + 6;
-      let left = rect.right - menuWidth;
+      const anchorRect = anchorRef.current.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
 
-      // Keep within viewport
-      if (left < 8) left = 8;
-      if (left + menuWidth > window.innerWidth - 8) {
-        left = window.innerWidth - menuWidth - 8;
+      const menuWidth = menuRect.width || 320;
+      const menuHeight = menuRect.height || 420;
+      const viewW = window.innerWidth;
+      const viewH = window.innerHeight;
+      const pad = 8;
+
+      let top = anchorRect.bottom + 6;
+      let left = anchorRect.right - menuWidth;
+
+      // Clamp horizontally
+      if (left < pad) left = pad;
+      if (left + menuWidth > viewW - pad) {
+        left = viewW - menuWidth - pad;
       }
-      if (top + menuHeight > window.innerHeight - 8) {
-        top = rect.top - menuHeight - 6;
+
+      // Clamp vertically: flip above anchor if overflowing bottom
+      if (top + menuHeight > viewH - pad) {
+        top = anchorRect.top - menuHeight - 6;
       }
+      if (top < pad) top = pad;
 
       setPosition({ top, left });
-    }
+      setIsPositioned(true);
+    });
+
+    return () => cancelAnimationFrame(raf);
   }, [anchorRef]);
 
   // Focus search when showing all
@@ -384,7 +401,8 @@ export default function AddToPlaylistMenu({
         style={{
           top: position.top,
           left: position.left,
-          animation: "fadeIn 0.12s ease-out",
+          opacity: isPositioned ? 1 : 0,
+          animation: isPositioned ? "fadeIn 0.12s ease-out" : undefined,
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -419,7 +437,7 @@ export default function AddToPlaylistMenu({
 
             {/* Back link */}
             <button
-              className="px-5 py-2 text-[12px] text-[#00FFFF] hover:text-white text-left transition-colors"
+              className="px-5 py-2 text-[12px] text-white hover:text-[#00FFFF] text-left transition-colors"
               onClick={() => {
                 setShowAll(false);
                 setSearchQuery("");

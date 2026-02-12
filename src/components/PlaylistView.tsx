@@ -219,6 +219,11 @@ export default function PlaylistView({
           showAlbum={true}
           showCover={true}
           context="playlist"
+          playlistId={playlistId}
+          isUserPlaylist={playlistInfo?.isUserPlaylist}
+          onTrackRemoved={(index) => {
+            setTracks((prev) => prev.filter((_, i) => i !== index));
+          }}
         />
 
         {tracks.length === 0 && (

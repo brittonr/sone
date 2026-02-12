@@ -2,6 +2,7 @@ import { Play, Heart, MoreHorizontal, Plus, Loader2 } from "lucide-react";
 import { type Track, getTidalImageUrl } from "../hooks/useAudio";
 import TidalImage from "./TidalImage";
 import AddToPlaylistMenu from "./AddToPlaylistMenu";
+import TrackContextMenu from "./TrackContextMenu";
 import { useAudioContext } from "../contexts/AudioContext";
 import { useRef, useEffect, useState, useCallback } from "react";
 
@@ -16,6 +17,10 @@ interface TrackListProps {
   hasMore?: boolean;
   loadingMore?: boolean;
   context?: "album" | "playlist" | "favorites";
+  /** For "Remove from playlist" support */
+  playlistId?: string;
+  isUserPlaylist?: boolean;
+  onTrackRemoved?: (index: number) => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -49,6 +54,9 @@ export default function TrackList({
   hasMore = false,
   loadingMore = false,
   context = "playlist",
+  playlistId,
+  isUserPlaylist,
+  onTrackRemoved,
 }: TrackListProps) {
   const {
     currentTrack,
@@ -63,14 +71,40 @@ export default function TrackList({
   const observerRef = useRef<IntersectionObserver | null>(null);
   const [playlistMenuTrackId, setPlaylistMenuTrackId] = useState<number | null>(null);
   const plusButtonRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+  const [contextMenuTrackId, setContextMenuTrackId] = useState<number | null>(null);
+  const [contextMenuTrackIndex, setContextMenuTrackIndex] = useState<number>(0);
+  const [contextMenuCursorPos, setContextMenuCursorPos] = useState<{ x: number; y: number } | undefined>(undefined);
+  const dotsButtonRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
 
   const handlePlusClick = useCallback((e: React.MouseEvent, track: Track) => {
     e.stopPropagation();
+    setContextMenuTrackId(null);
     setPlaylistMenuTrackId((prev) => (prev === track.id ? null : track.id));
   }, []);
 
   const closePlaylistMenu = useCallback(() => {
     setPlaylistMenuTrackId(null);
+  }, []);
+
+  const handleDotsClick = useCallback((e: React.MouseEvent, track: Track, index: number) => {
+    e.stopPropagation();
+    setPlaylistMenuTrackId(null);
+    setContextMenuCursorPos(undefined); // use anchor-based positioning
+    setContextMenuTrackIndex(index);
+    setContextMenuTrackId((prev) => (prev === track.id ? null : track.id));
+  }, []);
+
+  const handleRowContextMenu = useCallback((e: React.MouseEvent, track: Track, index: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setPlaylistMenuTrackId(null);
+    setContextMenuCursorPos({ x: e.clientX, y: e.clientY }); // position at cursor
+    setContextMenuTrackIndex(index);
+    setContextMenuTrackId(track.id);
+  }, []);
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenuTrackId(null);
   }, []);
 
   const toggleFavorite = async (e: React.MouseEvent, track: Track) => {
@@ -157,6 +191,7 @@ export default function TrackList({
             <div
               key={`${track.id}-${index}`}
               onClick={() => onPlay(track, index)}
+              onContextMenu={(e) => handleRowContextMenu(e, track, index)}
               className={`grid gap-4 px-4 py-2.5 rounded-md cursor-pointer group transition-colors items-center ${
                 isActive ? "bg-[#ffffff0a]" : "hover:bg-[#ffffff08]"
               }`}
@@ -261,13 +296,33 @@ export default function TrackList({
 
               {/* Actions: three dots on hover only, + and heart always visible */}
               <div className="flex items-center justify-end gap-2">
-                <button 
-                  className="p-1.5 text-[#a6a6a6] hover:text-white rounded-full transition-colors opacity-0 group-hover:opacity-100"
+                <button
+                  ref={(el) => {
+                    if (el) dotsButtonRefs.current.set(track.id, el);
+                    else dotsButtonRefs.current.delete(track.id);
+                  }}
+                  className={`p-1.5 rounded-full transition-colors ${
+                    contextMenuTrackId === track.id
+                      ? "text-white opacity-100"
+                      : "text-[#a6a6a6] hover:text-white opacity-0 group-hover:opacity-100"
+                  }`}
                   title="More options"
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={(e) => handleDotsClick(e, track, index)}
                 >
                   <MoreHorizontal size={18} />
                 </button>
+                {contextMenuTrackId === track.id && (
+                  <TrackContextMenu
+                    track={track}
+                    index={contextMenuTrackIndex}
+                    anchorRef={{ current: dotsButtonRefs.current.get(track.id) ?? null }}
+                    cursorPosition={contextMenuCursorPos}
+                    onClose={closeContextMenu}
+                    playlistId={playlistId}
+                    isUserPlaylist={isUserPlaylist}
+                    onTrackRemoved={onTrackRemoved}
+                  />
+                )}
                 <button
                   ref={(el) => {
                     if (el) plusButtonRefs.current.set(track.id, el);

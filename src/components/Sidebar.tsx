@@ -3,7 +3,6 @@ import {
   Compass,
   Library,
   Heart,
-  Plus,
 } from "lucide-react";
 import { useAudioContext } from "../contexts/AudioContext";
 import { getTidalImageUrl } from "../hooks/useAudio";
@@ -111,8 +110,8 @@ export default function Sidebar() {
         >
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
-            className={`flex items-center gap-2 text-[#b3b3b3] hover:text-white transition-colors duration-150 group ${
-              isCollapsed ? "justify-center w-full" : ""
+            className={`flex items-center gap-3 px-2.5 py-2 text-[#b3b3b3] hover:text-white transition-colors duration-150 group ${
+              isCollapsed ? "justify-center w-full px-0" : ""
             }`}
           >
             <Library size={20} />
@@ -120,17 +119,11 @@ export default function Sidebar() {
               <span className="font-semibold text-sm">Your Library</span>
             )}
           </button>
-
-          {!isCollapsed && (
-            <button className="text-[#b3b3b3] hover:text-white p-1 rounded-full hover:bg-white/[0.08] transition-colors duration-150">
-              <Plus size={16} />
-            </button>
-          )}
         </div>
 
         {/* Filter Pills */}
         {!isCollapsed && (
-          <div className="px-2 pb-2 flex gap-1.5 overflow-x-auto no-scrollbar">
+          <div className="px-2 pt-1 pb-2 flex gap-1.5 overflow-x-auto no-scrollbar">
             {["Playlists", "Artists", "Albums"].map((pill) => (
               <button
                 key={pill}
@@ -231,10 +224,10 @@ export default function Sidebar() {
 
                     {!isCollapsed && (
                       <div className="flex-1 min-w-0 text-left">
-                        <div className="text-[13px] font-medium text-white truncate leading-tight">
+                        <div className="text-[14px] font-medium text-white truncate leading-snug">
                           {playlist.title}
                         </div>
-                        <div className="text-[11px] text-[#808080] truncate leading-tight mt-0.5">
+                        <div className="text-[12px] text-[#808080] truncate leading-snug mt-0.5">
                           {subtitle}
                         </div>
                       </div>

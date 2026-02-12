@@ -83,6 +83,11 @@ export type AppView =
       type: "mix";
       mixId: string;
       mixInfo?: { title: string; image?: string; subtitle?: string };
+    }
+  | {
+      type: "trackRadio";
+      trackId: number;
+      trackInfo?: { title: string; artistName?: string; cover?: string };
     };
 
 export interface SearchResults {
@@ -609,6 +614,21 @@ export function useAudio() {
     []
   );
 
+  const removeTrackFromPlaylist = useCallback(
+    async (playlistId: string, index: number): Promise<void> => {
+      try {
+        await invoke("remove_track_from_playlist", {
+          playlistId,
+          index,
+        });
+      } catch (error: any) {
+        console.error("Failed to remove track from playlist:", error);
+        throw error;
+      }
+    },
+    []
+  );
+
   const getPlaylistTracks = useCallback(
     async (playlistId: string): Promise<Track[]> => {
       try {
@@ -708,6 +728,10 @@ export function useAudio() {
 
   const addToQueue = (track: Track) => {
     setQueue((prev) => [...prev, track]);
+  };
+
+  const playNextInQueue = (track: Track) => {
+    setQueue((prev) => [track, ...prev]);
   };
 
   const setQueueTracks = (tracks: Track[]) => {
@@ -934,6 +958,15 @@ export function useAudio() {
     mixInfo?: { title: string; image?: string; subtitle?: string }
   ) => {
     const view: AppView = { type: "mix", mixId, mixInfo };
+    window.history.pushState(view, "");
+    setCurrentView(view);
+  };
+
+  const navigateToTrackRadio = (
+    trackId: number,
+    trackInfo?: { title: string; artistName?: string; cover?: string }
+  ) => {
+    const view: AppView = { type: "trackRadio", trackId, trackInfo };
     window.history.pushState(view, "");
     setCurrentView(view);
   };
@@ -1177,6 +1210,7 @@ export function useAudio() {
     seekTo,
     getPlaybackPosition,
     addToQueue,
+    playNextInQueue,
     setQueueTracks,
     removeFromQueue,
     playNext,
@@ -1190,6 +1224,7 @@ export function useAudio() {
     getPlaylistTracks,
     createPlaylist,
     addTrackToPlaylist,
+    removeTrackFromPlaylist,
     getAlbumDetail,
     getAlbumTracks,
     getFavoriteTracks,
@@ -1209,6 +1244,7 @@ export function useAudio() {
     navigateToViewAll,
     navigateToArtist,
     navigateToMix,
+    navigateToTrackRadio,
     searchTidal,
     getHomePage,
     refreshHomePage,

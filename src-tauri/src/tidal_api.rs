@@ -572,6 +572,45 @@ impl TidalClient {
         Ok(())
     }
 
+    pub fn remove_track_from_playlist(&self, playlist_id: &str, index: u32) -> Result<(), String> {
+        let tokens = self.tokens.as_ref().ok_or("Not authenticated")?;
+
+        // First, get the playlist ETag which is required for modifications
+        let head_response = self
+            .client
+            .get(format!("{}/playlists/{}", TIDAL_API_URL, playlist_id))
+            .header("Authorization", format!("Bearer {}", tokens.access_token))
+            .query(&[("countryCode", "US")])
+            .send()
+            .map_err(|e| format!("Failed to get playlist ETag: {}", e))?;
+
+        let etag = head_response
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("*")
+            .to_string();
+
+        // Remove the track at the given index
+        let response = self
+            .client
+            .delete(format!("{}/playlists/{}/items/{}", TIDAL_API_URL, playlist_id, index))
+            .header("Authorization", format!("Bearer {}", tokens.access_token))
+            .header("If-None-Match", &etag)
+            .query(&[("countryCode", "US")])
+            .send()
+            .map_err(|e| format!("Failed to remove track from playlist: {}", e))?;
+
+        let status = response.status();
+
+        if !status.is_success() {
+            let body = response.text().unwrap_or_default();
+            return Err(format!("Remove track from playlist API error ({}): {}", status, body));
+        }
+
+        Ok(())
+    }
+
     pub fn get_favorite_playlists(&self, user_id: u64) -> Result<Vec<TidalPlaylist>, String> {
         let tokens = self.tokens.as_ref().ok_or("Not authenticated")?;
 

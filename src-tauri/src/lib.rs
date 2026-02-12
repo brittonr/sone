@@ -327,6 +327,16 @@ fn add_track_to_playlist(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+fn remove_track_from_playlist(
+    state: State<AppState>,
+    playlist_id: String,
+    index: u32,
+) -> Result<(), String> {
+    let client = state.tidal_client.lock().map_err(|e| e.to_string())?;
+    client.remove_track_from_playlist(&playlist_id, index)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 fn get_favorite_tracks(
     state: State<AppState>,
     user_id: u64,
@@ -751,6 +761,7 @@ pub fn run() {
             get_favorite_playlists,
             create_playlist,
             add_track_to_playlist,
+            remove_track_from_playlist,
             get_favorite_tracks,
             get_favorite_track_ids,
             is_track_favorited,
