@@ -1,6 +1,5 @@
 import {
   Play,
-  Clock,
   Pause,
   Music,
   Loader2,
@@ -14,17 +13,12 @@ import {
   type AlbumDetail,
 } from "../hooks/useAudio";
 import TidalImage from "./TidalImage";
+import TrackList from "./TrackList";
 
 interface AlbumViewProps {
   albumId: number;
   albumInfo?: { title: string; cover?: string; artistName?: string };
   onBack: () => void;
-}
-
-function formatDuration(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
 function formatTotalDuration(seconds: number): string {
@@ -67,8 +61,6 @@ export default function AlbumView({
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const observerRef = useRef<IntersectionObserver | null>(null);
   const offsetRef = useRef(0);
   const hasMoreRef = useRef(true);
 
@@ -142,38 +134,6 @@ export default function AlbumView({
     }
   }, [albumId, loadingMore, getAlbumTracks]);
 
-  // IntersectionObserver for infinite scroll
-  useEffect(() => {
-    if (loading) return;
-
-    if (observerRef.current) {
-      observerRef.current.disconnect();
-    }
-
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMoreRef.current) {
-          loadMore();
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    if (sentinelRef.current) {
-      observerRef.current.observe(sentinelRef.current);
-    }
-
-    return () => observerRef.current?.disconnect();
-  }, [loading, loadMore]);
-
-  // Re-observe sentinel when tracks change (sentinel re-renders)
-  useEffect(() => {
-    if (observerRef.current && sentinelRef.current && hasMore) {
-      observerRef.current.disconnect();
-      observerRef.current.observe(sentinelRef.current);
-    }
-  }, [tracks.length, hasMore]);
-
   const handlePlayTrack = async (track: Track, index: number) => {
     try {
       // Set remaining tracks as queue
@@ -228,14 +188,6 @@ export default function AlbumView({
 
   const isTrackFromThisAlbum = (track: Track) => {
     return track.album?.id === albumId;
-  };
-
-  const isCurrentlyPlaying = (track: Track) => {
-    return currentTrack?.id === track.id && isPlaying;
-  };
-
-  const isCurrentTrackRow = (track: Track) => {
-    return currentTrack?.id === track.id;
   };
 
   const albumPlaying =
@@ -362,94 +314,18 @@ export default function AlbumView({
 
       {/* Track List */}
       <div className="px-8 pb-8">
-        {/* Header Row */}
-        <div className="grid grid-cols-[36px_1fr_72px] gap-4 px-4 py-3 border-b border-[#2a2a2a] text-[12px] text-[#a6a6a6] uppercase tracking-widest mb-2">
-          <span className="text-right">#</span>
-          <span>Title</span>
-          <span className="flex justify-end">
-            <Clock size={15} />
-          </span>
-        </div>
-
-        {/* Track Rows */}
-        <div className="flex flex-col">
-          {tracks.map((track, index) => {
-            const isActive = isCurrentTrackRow(track);
-            const playing = isCurrentlyPlaying(track);
-
-            return (
-              <div
-                key={`${track.id}-${index}`}
-                onClick={() => handlePlayTrack(track, index)}
-                className={`grid grid-cols-[36px_1fr_72px] gap-4 px-4 py-2.5 rounded-md cursor-pointer group transition-colors ${
-                  isActive ? "bg-[#ffffff0a]" : "hover:bg-[#ffffff08]"
-                }`}
-              >
-                {/* Track Number / Playing Indicator */}
-                <div className="flex items-center justify-end">
-                  {playing ? (
-                    <div className="flex items-end gap-[3px] h-4">
-                      <span className="w-[3px] h-full bg-[#00FFFF] rounded-full playing-bar" />
-                      <span className="w-[3px] h-full bg-[#00FFFF] rounded-full playing-bar" style={{ animationDelay: "0.2s" }} />
-                      <span className="w-[3px] h-full bg-[#00FFFF] rounded-full playing-bar" style={{ animationDelay: "0.4s" }} />
-                    </div>
-                  ) : (
-                    <>
-                      <span
-                        className={`text-[15px] tabular-nums group-hover:hidden ${
-                          isActive ? "text-[#00FFFF]" : "text-[#a6a6a6]"
-                        }`}
-                      >
-                        {track.trackNumber ?? index + 1}
-                      </span>
-                      <Play
-                        size={14}
-                        fill="white"
-                        className="text-white hidden group-hover:block"
-                      />
-                    </>
-                  )}
-                </div>
-
-                {/* Title + Artist */}
-                <div className="flex flex-col justify-center min-w-0">
-                  <span
-                    className={`text-[15px] font-medium truncate leading-snug ${
-                      isActive ? "text-[#00FFFF]" : "text-white"
-                    }`}
-                  >
-                    {track.title}
-                  </span>
-                  <span className="text-[13px] text-[#a6a6a6] truncate leading-snug group-hover:text-white transition-colors">
-                    {track.artist?.name || displayArtist}
-                  </span>
-                </div>
-
-                {/* Duration */}
-                <div className="flex items-center justify-end text-[14px] text-[#a6a6a6] tabular-nums">
-                  {formatDuration(track.duration)}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Infinite Scroll Sentinel */}
-        {hasMore && (
-          <div
-            ref={sentinelRef}
-            className="flex items-center justify-center py-8"
-          >
-            {loadingMore ? (
-              <div className="flex items-center gap-3 text-[#a6a6a6]">
-                <Loader2 size={20} className="animate-spin" />
-                <span className="text-sm">Loading more tracks...</span>
-              </div>
-            ) : (
-              <div className="h-8" />
-            )}
-          </div>
-        )}
+        <TrackList
+          tracks={tracks}
+          onPlay={handlePlayTrack}
+          onLoadMore={loadMore}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+          showDateAdded={false}
+          showArtist={true}
+          showAlbum={false}
+          showCover={false}
+          context="album"
+        />
 
         {/* End of list */}
         {!hasMore && tracks.length > 0 && (

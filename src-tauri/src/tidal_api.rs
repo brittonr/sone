@@ -47,6 +47,8 @@ pub struct TidalTrack {
     pub audio_quality: Option<String>,
     #[serde(default)]
     pub track_number: Option<u32>,
+    #[serde(default)]
+    pub date_added: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -493,9 +495,10 @@ impl TidalClient {
     pub fn get_playlist_tracks(&self, playlist_id: &str) -> Result<Vec<TidalTrack>, String> {
         let tokens = self.tokens.as_ref().ok_or("Not authenticated")?;
 
+        // Use /tracks endpoint (not /items) which includes dateAdded on each track
         let response = self
             .client
-            .get(format!("{}/playlists/{}/items", TIDAL_API_URL, playlist_id))
+            .get(format!("{}/playlists/{}/tracks", TIDAL_API_URL, playlist_id))
             .header("Authorization", format!("Bearer {}", tokens.access_token))
             .query(&[("countryCode", "US"), ("limit", "100")])
             .send()
@@ -509,19 +512,14 @@ impl TidalClient {
         }
 
         #[derive(Deserialize)]
-        struct TrackItem {
-            item: TidalTrack,
-        }
-
-        #[derive(Deserialize)]
         struct TracksResponse {
-            items: Vec<TrackItem>,
+            items: Vec<TidalTrack>,
         }
 
         let data = serde_json::from_str::<TracksResponse>(&body)
             .map_err(|e| format!("Failed to parse tracks: {} - Body: {}", e, body))?;
 
-        Ok(data.items.into_iter().map(|t| t.item).collect())
+        Ok(data.items)
     }
 
     pub fn get_album_detail(&self, album_id: u64) -> Result<TidalAlbumDetail, String> {
@@ -617,6 +615,7 @@ impl TidalClient {
         #[derive(Deserialize)]
         struct FavoriteTrackItem {
             item: TidalTrack,
+            created: String,
         }
 
         #[derive(Deserialize)]
@@ -634,7 +633,11 @@ impl TidalClient {
             .map_err(|e| format!("Failed to parse favorite tracks: {} - Body: {}", e, body))?;
 
         Ok(PaginatedTracks {
-            items: data.items.into_iter().map(|f| f.item).collect(),
+            items: data.items.into_iter().map(|f| {
+                let mut t = f.item;
+                t.date_added = Some(f.created);
+                t
+            }).collect(),
             total_number_of_items: data.total_number_of_items,
             offset: data.offset,
             limit: data.limit,
@@ -689,6 +692,46 @@ impl TidalClient {
                     .as_ref()
                     .is_some_and(|track| track.id == track_id)
         }))
+    }
+
+    pub fn get_favorite_track_ids(&self, user_id: u64) -> Result<Vec<u64>, String> {
+        let tokens = self.tokens.as_ref().ok_or("Not authenticated")?;
+        let response = self
+            .client
+            .get(format!("{}/users/{}/favorites/tracks", TIDAL_API_URL, user_id))
+            .header("Authorization", format!("Bearer {}", tokens.access_token))
+            .query(&[
+                ("countryCode", "US"),
+                ("limit", "2000"),
+                ("offset", "0"),
+                ("order", "DATE"),
+                ("orderDirection", "DESC"),
+            ])
+            .send()
+            .map_err(|e| format!("Failed to fetch favorite tracks: {}", e))?;
+
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+
+        if !status.is_success() {
+            return Err(format!("API error ({}): {}", status, body));
+        }
+
+        #[derive(Deserialize)]
+        struct FavItem {
+            item: TidalTrack,
+        }
+
+        #[derive(Deserialize)]
+        struct FavResponse {
+            #[serde(default)]
+            items: Vec<FavItem>,
+        }
+
+        let data = serde_json::from_str::<FavResponse>(&body)
+            .map_err(|e| format!("Failed to parse favorite track ids: {}", e))?;
+
+        Ok(data.items.into_iter().map(|f| f.item.id).collect())
     }
 
     pub fn add_favorite_track(&self, user_id: u64, track_id: u64) -> Result<(), String> {

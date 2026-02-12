@@ -1,17 +1,11 @@
-import { ChevronLeft, Play, Clock, Pause, Heart, Loader2 } from "lucide-react";
+import { Heart, Loader2 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAudioContext } from "../contexts/AudioContext";
-import { getTidalImageUrl, type Track } from "../hooks/useAudio";
-import TidalImage from "./TidalImage";
+import { type Track } from "../hooks/useAudio";
+import TrackList from "./TrackList";
 
 interface FavoritesViewProps {
   onBack: () => void;
-}
-
-function formatDuration(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
 const PAGE_SIZE = 50;
@@ -25,7 +19,6 @@ export default function FavoritesView({ onBack }: FavoritesViewProps) {
     isPlaying,
     pauseTrack,
     resumeTrack,
-    navigateToAlbum,
   } = useAudioContext();
 
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -34,8 +27,6 @@ export default function FavoritesView({ onBack }: FavoritesViewProps) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const observerRef = useRef<IntersectionObserver | null>(null);
   const offsetRef = useRef(0);
   const hasMoreRef = useRef(true);
 
@@ -96,38 +87,6 @@ export default function FavoritesView({ onBack }: FavoritesViewProps) {
     }
   }, [loadingMore, getFavoriteTracks]);
 
-  // IntersectionObserver for infinite scroll
-  useEffect(() => {
-    if (loading) return;
-
-    if (observerRef.current) {
-      observerRef.current.disconnect();
-    }
-
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMoreRef.current) {
-          loadMore();
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    if (sentinelRef.current) {
-      observerRef.current.observe(sentinelRef.current);
-    }
-
-    return () => observerRef.current?.disconnect();
-  }, [loading, loadMore]);
-
-  // Re-observe sentinel when tracks change
-  useEffect(() => {
-    if (observerRef.current && sentinelRef.current && hasMore) {
-      observerRef.current.disconnect();
-      observerRef.current.observe(sentinelRef.current);
-    }
-  }, [tracks.length, hasMore]);
-
   const handlePlayTrack = async (track: Track, index: number) => {
     try {
       const remaining = tracks.slice(index + 1);
@@ -157,14 +116,6 @@ export default function FavoritesView({ onBack }: FavoritesViewProps) {
     } catch (err) {
       console.error("Failed to play all:", err);
     }
-  };
-
-  const isCurrentlyPlaying = (track: Track) => {
-    return currentTrack?.id === track.id && isPlaying;
-  };
-
-  const isCurrentTrackRow = (track: Track) => {
-    return currentTrack?.id === track.id;
   };
 
   if (loading) {
@@ -221,150 +172,20 @@ export default function FavoritesView({ onBack }: FavoritesViewProps) {
         </div>
       </div>
 
-      {/* Play Controls */}
-      <div className="px-8 py-5 flex items-center gap-5">
-        <button
-          onClick={handlePlayAll}
-          className="w-14 h-14 bg-[#00FFFF] rounded-full flex items-center justify-center shadow-xl hover:scale-105 hover:brightness-110 transition-[transform,filter] duration-150"
-        >
-          {isPlaying ? (
-            <Pause size={24} fill="black" className="text-black" />
-          ) : (
-            <Play size={24} fill="black" className="text-black ml-1" />
-          )}
-        </button>
-      </div>
-
       {/* Track List */}
       <div className="px-8 pb-8">
-        {/* Header Row */}
-        <div className="grid grid-cols-[36px_1fr_36px_minmax(140px,1fr)_72px] gap-4 px-4 py-3 border-b border-[#2a2a2a] text-[12px] text-[#a6a6a6] uppercase tracking-widest mb-2">
-          <span className="text-right">#</span>
-          <span>Title</span>
-          <span />
-          <span>Album</span>
-          <span className="flex justify-end">
-            <Clock size={15} />
-          </span>
-        </div>
-
-        {/* Track Rows */}
-        <div className="flex flex-col">
-          {tracks.map((track, index) => {
-            const isActive = isCurrentTrackRow(track);
-            const playing = isCurrentlyPlaying(track);
-
-            return (
-              <div
-                key={`${track.id}-${index}`}
-                onClick={() => handlePlayTrack(track, index)}
-                className={`grid grid-cols-[36px_1fr_36px_minmax(140px,1fr)_72px] gap-4 px-4 py-2.5 rounded-md cursor-pointer group transition-colors ${
-                  isActive ? "bg-[#ffffff0a]" : "hover:bg-[#ffffff08]"
-                }`}
-              >
-                {/* Track Number / Playing Indicator */}
-                <div className="flex items-center justify-end">
-                  {playing ? (
-                    <div className="flex items-end gap-[3px] h-4">
-                      <span className="w-[3px] h-full bg-[#00FFFF] rounded-full playing-bar" />
-                      <span className="w-[3px] h-full bg-[#00FFFF] rounded-full playing-bar" style={{ animationDelay: "0.2s" }} />
-                      <span className="w-[3px] h-full bg-[#00FFFF] rounded-full playing-bar" style={{ animationDelay: "0.4s" }} />
-                    </div>
-                  ) : (
-                    <span
-                      className={`text-[15px] tabular-nums ${
-                        isActive ? "text-[#00FFFF]" : "text-[#a6a6a6]"
-                      }`}
-                    >
-                      {index + 1}
-                    </span>
-                  )}
-                </div>
-
-                {/* Thumbnail (with play overlay) + Title + Artist */}
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="relative w-10 h-10 shrink-0 rounded bg-[#282828] overflow-hidden">
-                    <TidalImage
-                      src={getTidalImageUrl(track.album?.cover, 160)}
-                      alt={track.album?.title || track.title}
-                      className="w-full h-full"
-                    />
-                    {/* Play overlay on thumbnail */}
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                      <Play
-                        size={18}
-                        fill="white"
-                        className="text-white ml-0.5"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex flex-col justify-center min-w-0">
-                    <span
-                      className={`text-[15px] font-medium truncate leading-snug ${
-                        isActive ? "text-[#00FFFF]" : "text-white"
-                      }`}
-                    >
-                      {track.title}
-                    </span>
-                    <span className="text-[13px] text-[#a6a6a6] truncate leading-snug group-hover:text-white transition-colors">
-                      {track.artist?.name || "Unknown Artist"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Favorite Heart */}
-                <div className="flex items-center justify-center">
-                  <Heart
-                    size={16}
-                    fill="#1ed760"
-                    className="text-[#1ed760] opacity-70 group-hover:opacity-100 transition-opacity"
-                  />
-                </div>
-
-                {/* Album Name */}
-                <div className="flex items-center min-w-0">
-                  <span
-                    className="text-[14px] text-[#a6a6a6] truncate hover:text-white hover:underline transition-colors cursor-pointer"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (track.album?.id) {
-                        navigateToAlbum(track.album.id, {
-                          title: track.album.title,
-                          cover: track.album.cover,
-                          artistName: track.artist?.name,
-                        });
-                      }
-                    }}
-                  >
-                    {track.album?.title || ""}
-                  </span>
-                </div>
-
-                {/* Duration */}
-                <div className="flex items-center justify-end text-[14px] text-[#a6a6a6] tabular-nums">
-                  {formatDuration(track.duration)}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Infinite Scroll Sentinel */}
-        {hasMore && (
-          <div
-            ref={sentinelRef}
-            className="flex items-center justify-center py-8"
-          >
-            {loadingMore ? (
-              <div className="flex items-center gap-3 text-[#a6a6a6]">
-                <Loader2 size={20} className="animate-spin" />
-                <span className="text-sm">Loading more tracks...</span>
-              </div>
-            ) : (
-              <div className="h-8" />
-            )}
-          </div>
-        )}
+        <TrackList 
+          tracks={tracks}
+          onPlay={handlePlayTrack}
+          onLoadMore={loadMore}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+          showDateAdded={true}
+          showArtist={true}
+          showAlbum={true}
+          showCover={true}
+          context="favorites"
+        />
 
         {/* End of list */}
         {!hasMore && tracks.length > 0 && (

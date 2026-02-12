@@ -83,6 +83,7 @@ export default function Home() {
       description: playlist.description,
       creatorName: playlist.creator?.name || "You",
       numberOfTracks: playlist.numberOfTracks,
+      isUserPlaylist: true,
     });
   };
 

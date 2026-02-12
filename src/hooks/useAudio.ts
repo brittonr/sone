@@ -28,6 +28,7 @@ export interface Track {
   duration: number;
   audioQuality?: string;
   trackNumber?: number;
+  dateAdded?: string;
 }
 
 export interface AlbumDetail {
@@ -63,6 +64,7 @@ export type AppView =
         description?: string;
         creatorName?: string;
         numberOfTracks?: number;
+        isUserPlaylist?: boolean;
       };
     }
   | { type: "favorites" }
@@ -194,6 +196,7 @@ export function useAudio() {
   const [drawerTab, setDrawerTab] = useState<string>("queue");
   const [streamInfo, setStreamInfo] = useState<StreamInfo | null>(null);
   const [userName, setUserName] = useState<string>("Tidal User");
+  const [favoriteTrackIds, setFavoriteTrackIds] = useState<Set<number>>(new Set());
   const currentTrackRef = useRef<Track | null>(null);
   const hasRestoredPlaybackRef = useRef(false);
   const volumePersistReady = useRef(false);
@@ -706,6 +709,7 @@ export function useAudio() {
       description?: string;
       creatorName?: string;
       numberOfTracks?: number;
+      isUserPlaylist?: boolean;
     }
   ) => {
     const view: AppView = { type: "playlist", playlistId, playlistInfo };
@@ -733,6 +737,25 @@ export function useAudio() {
     [authTokens?.user_id]
   );
 
+  const loadFavoriteTrackIds = useCallback(async () => {
+    if (!authTokens?.user_id) return;
+    try {
+      const ids = await invoke<number[]>("get_favorite_track_ids", {
+        userId: authTokens.user_id,
+      });
+      setFavoriteTrackIds(new Set(ids));
+    } catch (error: any) {
+      console.error("Failed to load favorite track IDs:", error);
+    }
+  }, [authTokens?.user_id]);
+
+  // Load favorite track IDs when authenticated
+  useEffect(() => {
+    if (authTokens?.user_id) {
+      loadFavoriteTrackIds();
+    }
+  }, [authTokens?.user_id, loadFavoriteTrackIds]);
+
   const isTrackFavorited = async (trackId: number): Promise<boolean> => {
     if (!authTokens?.user_id) throw new Error("Not authenticated");
     try {
@@ -753,6 +776,8 @@ export function useAudio() {
         userId: authTokens.user_id,
         trackId,
       });
+      // Update local cache optimistically
+      setFavoriteTrackIds((prev) => new Set([...prev, trackId]));
     } catch (error: any) {
       console.error("Failed to favorite track:", error);
       throw error;
@@ -765,6 +790,12 @@ export function useAudio() {
       await invoke("remove_favorite_track", {
         userId: authTokens.user_id,
         trackId,
+      });
+      // Update local cache optimistically
+      setFavoriteTrackIds((prev) => {
+        const next = new Set(prev);
+        next.delete(trackId);
+        return next;
       });
     } catch (error: any) {
       console.error("Failed to remove favorite track:", error);
@@ -1105,6 +1136,8 @@ export function useAudio() {
     getAlbumDetail,
     getAlbumTracks,
     getFavoriteTracks,
+    favoriteTrackIds,
+    loadFavoriteTrackIds,
     isTrackFavorited,
     addFavoriteTrack,
     removeFavoriteTrack,
