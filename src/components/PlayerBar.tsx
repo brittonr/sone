@@ -16,7 +16,12 @@ import { getTidalImageUrl } from "../types";
 import TidalImage from "./TidalImage";
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { useAtomValue } from "jotai";
-import { currentTrackAtom, isPlayingAtom, volumeAtom, streamInfoAtom } from "../atoms/playback";
+import {
+  currentTrackAtom,
+  isPlayingAtom,
+  volumeAtom,
+  streamInfoAtom,
+} from "../atoms/playback";
 import { favoriteTrackIdsAtom } from "../atoms/favorites";
 import { usePlayback } from "../hooks/usePlayback";
 import { useFavorites } from "../hooks/useFavorites";
@@ -354,6 +359,11 @@ const QualityBadge = memo(function QualityBadge() {
 
   return (
     <div className="flex flex-col items-end gap-0.5">
+      {detail && (
+        <span className="text-[9px] text-th-text-faint font-medium tracking-wide hidden xl:inline">
+          {detail}
+        </span>
+      )}
       <span
         className={`px-2 py-0.5 text-[9px] font-black rounded tracking-wider leading-none ${
           isMax
@@ -365,11 +375,6 @@ const QualityBadge = memo(function QualityBadge() {
       >
         {label}
       </span>
-      {detail && (
-        <span className="text-[9px] text-th-text-faint font-medium tracking-wide hidden xl:inline">
-          {detail}
-        </span>
-      )}
     </div>
   );
 });
