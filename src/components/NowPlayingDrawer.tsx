@@ -7,13 +7,21 @@ import {
   Music,
   Loader2,
   Plus,
+  Play,
+  Heart,
+  MoreHorizontal,
+  ListPlus,
+  GripVertical,
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePlayback } from "../hooks/usePlayback";
 import { useDrawer } from "../hooks/useDrawer";
+import { useFavorites } from "../hooks/useFavorites";
+import { useToast } from "../contexts/ToastContext";
 import { getTrackRadio, getTrackLyrics, getTrackCredits } from "../api/tidal";
 import { getTidalImageUrl, type Track, type Lyrics, type Credit } from "../types";
 import TidalImage from "./TidalImage";
+import TrackContextMenu from "./TrackContextMenu";
 
 type TabId = "queue" | "suggested" | "lyrics" | "credits";
 
@@ -36,6 +44,56 @@ function QueueTab() {
     setQueueTracks,
     removeFromQueue,
   } = usePlayback();
+
+  // Use a ref so drop handler always reads the current source index
+  const dragIdxRef = useRef<number | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dropIdx, setDropIdx] = useState<number | null>(null);
+
+  const handleDragStart = useCallback((e: React.DragEvent, idx: number) => {
+    dragIdxRef.current = idx;
+    setDragIdx(idx);
+    // Required for WebKit/Tauri to allow the drag
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(idx));
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, idx: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropIdx(idx);
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    setDropIdx(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent, targetIdx: number) => {
+      e.preventDefault();
+      const sourceIdx = dragIdxRef.current;
+      if (sourceIdx === null || sourceIdx === targetIdx) {
+        dragIdxRef.current = null;
+        setDragIdx(null);
+        setDropIdx(null);
+        return;
+      }
+      const reordered = [...queue];
+      const [moved] = reordered.splice(sourceIdx, 1);
+      reordered.splice(targetIdx, 0, moved);
+      setQueueTracks(reordered);
+      dragIdxRef.current = null;
+      setDragIdx(null);
+      setDropIdx(null);
+    },
+    [queue, setQueueTracks]
+  );
+
+  const handleDragEnd = useCallback(() => {
+    dragIdxRef.current = null;
+    setDragIdx(null);
+    setDropIdx(null);
+  }, []);
 
   return (
     <div className="flex flex-col gap-6">
@@ -75,7 +133,7 @@ function QueueTab() {
         </section>
       )}
 
-      {/* Next Up */}
+      {/* Next Up — draggable */}
       {queue.length > 0 && (
         <section>
           <div className="flex items-center justify-between mb-3">
@@ -89,21 +147,60 @@ function QueueTab() {
               Clear
             </button>
           </div>
-          <div className="flex flex-col gap-0.5">
-            {queue.map((track, i) => (
-              <TrackRow
-                key={`queue-${track.id}-${i}`}
-                track={track}
-                isActive={false}
-                isPlaying={false}
-                onClick={() => {
-                  const remaining = queue.slice(i + 1);
-                  setQueueTracks(remaining);
-                  playTrack(track);
-                }}
-                onRemove={() => removeFromQueue(i)}
-              />
-            ))}
+          <div className="flex flex-col">
+            {queue.map((track, i) => {
+              const isDragged = dragIdx === i;
+              const showDropAbove =
+                dragIdx !== null && dropIdx === i && dragIdx > i;
+              const showDropBelow =
+                dragIdx !== null && dropIdx === i && dragIdx < i;
+
+              return (
+                <div
+                  key={`queue-${track.id}-${i}`}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, i)}
+                  onDragOver={(e) => handleDragOver(e, i)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, i)}
+                  onDragEnd={handleDragEnd}
+                  className={`relative flex items-center gap-1 rounded-md transition-opacity duration-150 ${
+                    isDragged ? "opacity-30" : "opacity-100"
+                  }`}
+                >
+                  {/* Drop indicator line — above */}
+                  {showDropAbove && (
+                    <div className="absolute -top-[1px] left-6 right-0 h-[2px] bg-[#00FFFF] rounded-full z-10 pointer-events-none">
+                      <div className="absolute -left-1 -top-[3px] w-2 h-2 rounded-full bg-[#00FFFF]" />
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-center w-6 shrink-0 cursor-grab active:cursor-grabbing text-[#535353] hover:text-[#a6a6a6] transition-colors">
+                    <GripVertical size={14} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <TrackRow
+                      track={track}
+                      isActive={false}
+                      isPlaying={false}
+                      onClick={() => {
+                        const remaining = queue.slice(i + 1);
+                        setQueueTracks(remaining);
+                        playTrack(track);
+                      }}
+                      onRemove={() => removeFromQueue(i)}
+                    />
+                  </div>
+
+                  {/* Drop indicator line — below */}
+                  {showDropBelow && (
+                    <div className="absolute -bottom-[1px] left-6 right-0 h-[2px] bg-[#00FFFF] rounded-full z-10 pointer-events-none">
+                      <div className="absolute -left-1 -top-[3px] w-2 h-2 rounded-full bg-[#00FFFF]" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
       )}
@@ -120,8 +217,182 @@ function QueueTab() {
 
 // ─── Suggested Tracks Tab ────────────────────────────────────────────────────
 
+function SuggestedTrackRow({
+  track,
+  isActive,
+  index,
+  isFav,
+  onPlay,
+  onAddToQueue,
+  onToggleFavorite,
+}: {
+  track: Track;
+  isActive: boolean;
+  index: number;
+  isFav: boolean;
+  onPlay: (track: Track) => void;
+  onAddToQueue: (track: Track) => void;
+  onToggleFavorite: (trackId: number, isFav: boolean) => void;
+}) {
+  // Context menu state — lightweight, no heavy hooks
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const dotsBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [dotsMenuOpen, setDotsMenuOpen] = useState(false);
+
+  const handleRightClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  }, []);
+
+  const handleRowClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onAddToQueue(track);
+    },
+    [track, onAddToQueue]
+  );
+
+  const handlePlayClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onPlay(track);
+    },
+    [track, onPlay]
+  );
+
+  const handleToggleFavorite = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onToggleFavorite(track.id, isFav);
+    },
+    [track.id, isFav, onToggleFavorite]
+  );
+
+  const handleAddToQueue = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onAddToQueue(track);
+    },
+    [track, onAddToQueue]
+  );
+
+  const handleDotsClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setDotsMenuOpen(true);
+    },
+    []
+  );
+
+  return (
+    <>
+      <div
+        onClick={handleRowClick}
+        onContextMenu={handleRightClick}
+        className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer group transition-[background-color] duration-150 ${
+          isActive ? "bg-white/[0.08]" : "hover:bg-white/[0.05]"
+        }`}
+      >
+        {/* Album art with play overlay — scoped hover via group/image */}
+        <div
+          className="w-10 h-10 rounded bg-[#282828] overflow-hidden shrink-0 relative cursor-pointer group/image"
+          onClick={handlePlayClick}
+        >
+          <TidalImage
+            src={getTidalImageUrl(track.album?.cover, 80)}
+            alt={track.title}
+            className="w-full h-full"
+          />
+          {/* Play overlay — only visible when hovering the image itself */}
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover/image:opacity-100 transition-opacity">
+            <Play
+              size={14}
+              fill="white"
+              className="text-white ml-0.5"
+            />
+          </div>
+        </div>
+
+        {/* Track info */}
+        <div className="flex-1 min-w-0">
+          <p
+            className={`text-[13px] font-medium truncate ${
+              isActive ? "text-[#00FFFF]" : "text-white"
+            }`}
+          >
+            {track.title}
+          </p>
+          <p className="text-[11px] text-[#a6a6a6] truncate">
+            {track.artist?.name || "Unknown Artist"}
+          </p>
+        </div>
+
+        {/* Right-side action icons */}
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          {/* Three dots menu */}
+          <button
+            ref={dotsBtnRef}
+            onClick={handleDotsClick}
+            className="w-7 h-7 rounded-full flex items-center justify-center text-[#a6a6a6] hover:text-white hover:bg-white/10 transition-colors duration-150"
+            title="More options"
+          >
+            <MoreHorizontal size={15} />
+          </button>
+
+          {/* Heart / favorite */}
+          <button
+            onClick={handleToggleFavorite}
+            className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors duration-150"
+            title={isFav ? "Remove from Loved tracks" : "Add to Loved tracks"}
+          >
+            <Heart
+              size={15}
+              className={isFav ? "text-[#00FFFF]" : "text-[#a6a6a6] hover:text-white"}
+              fill={isFav ? "currentColor" : "none"}
+            />
+          </button>
+
+          {/* Add to queue */}
+          <button
+            onClick={handleAddToQueue}
+            className="w-7 h-7 rounded-full flex items-center justify-center text-[#a6a6a6] hover:text-white hover:bg-white/10 transition-colors duration-150"
+            title="Add to queue"
+          >
+            <ListPlus size={15} />
+          </button>
+        </div>
+      </div>
+
+      {/* Context menu (right-click) */}
+      {contextMenu && (
+        <TrackContextMenu
+          track={track}
+          index={index}
+          anchorRef={{ current: null } as React.RefObject<HTMLButtonElement | null>}
+          cursorPosition={contextMenu}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* Context menu (dots button) */}
+      {dotsMenuOpen && (
+        <TrackContextMenu
+          track={track}
+          index={index}
+          anchorRef={dotsBtnRef}
+          onClose={() => setDotsMenuOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
 function SuggestedTab() {
   const { currentTrack, playTrack, addToQueue } = usePlayback();
+  const { favoriteTrackIds, addFavoriteTrack, removeFavoriteTrack } = useFavorites();
+  const { showToast } = useToast();
+
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -149,6 +420,33 @@ function SuggestedTab() {
     };
   }, [currentTrack?.id]);
 
+  // Stable callbacks passed to every row — hooks called once here, not per row
+  const handleAddToQueue = useCallback(
+    (track: Track) => {
+      addToQueue(track);
+      const label = track.title.length > 30 ? track.title.slice(0, 28) + "…" : track.title;
+      showToast(`Added "${label}" to queue`, "success");
+    },
+    [addToQueue, showToast]
+  );
+
+  const handleToggleFavorite = useCallback(
+    async (trackId: number, currentlyFav: boolean) => {
+      try {
+        if (currentlyFav) {
+          await removeFavoriteTrack(trackId);
+          showToast("Removed from Loved tracks");
+        } else {
+          await addFavoriteTrack(trackId);
+          showToast("Added to Loved tracks");
+        }
+      } catch {
+        showToast("Failed to update Loved tracks", "error");
+      }
+    },
+    [addFavoriteTrack, removeFavoriteTrack, showToast]
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -169,13 +467,15 @@ function SuggestedTab() {
   return (
     <div className="flex flex-col gap-0.5">
       {tracks.map((track, i) => (
-        <TrackRow
+        <SuggestedTrackRow
           key={`sug-${track.id}-${i}`}
           track={track}
           isActive={currentTrack?.id === track.id}
-          isPlaying={false}
-          onClick={() => playTrack(track)}
-          onAdd={() => addToQueue(track)}
+          index={i}
+          isFav={favoriteTrackIds.has(track.id)}
+          onPlay={playTrack}
+          onAddToQueue={handleAddToQueue}
+          onToggleFavorite={handleToggleFavorite}
         />
       ))}
     </div>
