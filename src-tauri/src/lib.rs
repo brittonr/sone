@@ -9,7 +9,7 @@ use sha2::{Sha256, Digest};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{State, Manager};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tidal_api::{AuthTokens, DeviceAuthResponse, HomePageResponse, PaginatedTracks, StreamInfo, SuggestionsResponse, TidalAlbumDetail, TidalArtistDetail, TidalClient, TidalCredit, TidalLyrics, TidalPlaylist, TidalSearchResults, TidalTrack};
 
@@ -1022,6 +1022,20 @@ pub fn run() {
         .manage(app_state)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .setup(|app| {
+            // Set window icon at runtime (needed for dev mode taskbar icon)
+            if let Some(window) = app.get_webview_window("main") {
+                let icon_bytes = include_bytes!("../icons/icon.png");
+                // Manually decode the PNG to RGBA to ensure it works
+                if let Ok(image) = image::load_from_memory(icon_bytes) {
+                    let rgba = image.to_rgba8();
+                    let (width, height) = rgba.dimensions();
+                    let icon = tauri::image::Image::new(rgba.as_raw(), width, height);
+                    let _ = window.set_icon(icon);
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             load_saved_auth,
