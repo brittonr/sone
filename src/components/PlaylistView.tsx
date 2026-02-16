@@ -1,5 +1,5 @@
 import { Play, Pause, Music, X, Shuffle, Heart, Loader2, MoreHorizontal } from "lucide-react";
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef, startTransition } from "react";
 import { useAtomValue } from "jotai";
 import { isPlayingAtom, currentTrackAtom } from "../atoms/playback";
 import { usePlaybackActions } from "../hooks/usePlaybackActions";
@@ -95,8 +95,10 @@ export default function PlaylistView({
         const page = await getPlaylistTracksPage(playlistId, offsetRef.current, PAGE_SIZE);
         if (cancelledRef.current) return;
 
-        setAllTracks((prev) => [...prev, ...page.items]);
-        setTotalTracks(page.totalNumberOfItems);
+        startTransition(() => {
+          setAllTracks((prev) => [...prev, ...page.items]);
+          setTotalTracks(page.totalNumberOfItems);
+        });
         offsetRef.current += page.items.length;
         hasMoreRef.current = offsetRef.current < page.totalNumberOfItems;
       }
@@ -130,29 +132,40 @@ export default function PlaylistView({
 
   // Local search / filter (debounce handled inside DebouncedFilterInput)
   const [searchQuery, setSearchQuery] = useState("");
+  const isFiltering = searchQuery.trim().length > 0;
 
-  const filteredTracks = useMemo(() => {
+  const { filteredTracks, displayNumbers } = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return tracks;
-    return tracks.filter(
-      (t) =>
+    if (!q) return { filteredTracks: tracks, displayNumbers: undefined };
+    const filtered: Track[] = [];
+    const numbers: number[] = [];
+    tracks.forEach((t, i) => {
+      if (
         t.title.toLowerCase().includes(q) ||
         (t.artist?.name?.toLowerCase().includes(q)) ||
         (t.album?.title?.toLowerCase().includes(q))
-    );
+      ) {
+        filtered.push(t);
+        numbers.push(i + 1);
+      }
+    });
+    return { filteredTracks: filtered, displayNumbers: numbers };
   }, [tracks, searchQuery]);
 
   const handleSearchFocus = useCallback(() => {
     if (hasMoreRef.current && !bgFetchingRef.current) {
-      fetchRemaining();
+      setTimeout(() => fetchRemaining(), 0);
     }
   }, [fetchRemaining]);
 
   const trackIds = useMemo(() => new Set(tracks.map((track) => track.id)), [tracks]);
 
-  const handlePlayTrack = async (track: Track, index: number) => {
+  const handlePlayTrack = async (track: Track, _index: number) => {
     try {
-      setQueueTracks(tracks.slice(index + 1));
+      // Always queue from the full unfiltered list based on the track's original position
+      const originalIndex = tracks.findIndex((t) => t.id === track.id);
+      const queueStart = originalIndex >= 0 ? originalIndex + 1 : 0;
+      setQueueTracks(tracks.slice(queueStart));
       await playTrack(track);
 
       // Kick off background fetch for the rest if needed
@@ -420,9 +433,10 @@ export default function PlaylistView({
         <TrackList
           tracks={filteredTracks}
           onPlay={handlePlayTrack}
-          onLoadMore={loadMore}
-          hasMore={hasMore}
-          loadingMore={loadingMore}
+          onLoadMore={isFiltering ? undefined : loadMore}
+          hasMore={isFiltering ? false : hasMore}
+          loadingMore={isFiltering ? false : loadingMore}
+          trackDisplayNumbers={displayNumbers}
           showDateAdded={!!playlistInfo?.isUserPlaylist}
           showArtist={true}
           showAlbum={true}

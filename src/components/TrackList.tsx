@@ -21,6 +21,8 @@ interface TrackListProps {
   hasMore?: boolean;
   loadingMore?: boolean;
   context?: "album" | "playlist" | "favorites" | "search";
+  /** Optional per-row display numbers (e.g. original playlist position when filtering) */
+  trackDisplayNumbers?: number[];
   /** For "Remove from playlist" support */
   playlistId?: string;
   isUserPlaylist?: boolean;
@@ -52,6 +54,7 @@ function formatDate(dateString?: string): string {
 interface TrackRowProps {
   track: Track;
   index: number;
+  displayNumber?: number;
   gridCols: string;
   showCover: boolean;
   showArtist: boolean;
@@ -67,6 +70,7 @@ interface TrackRowProps {
 const TrackRow = memo(function TrackRow({
   track,
   index,
+  displayNumber,
   gridCols,
   showCover,
   showArtist,
@@ -152,7 +156,7 @@ const TrackRow = memo(function TrackRow({
                 isActive ? "text-th-accent" : "text-th-text-muted"
               }`}
             >
-              {context === "album" ? (track.trackNumber ?? index + 1) : index + 1}
+              {displayNumber != null ? displayNumber : context === "album" ? (track.trackNumber ?? index + 1) : index + 1}
             </span>
             <Play
               size={14}
@@ -326,6 +330,7 @@ export default function TrackList({
   hasMore = false,
   loadingMore = false,
   context = "playlist",
+  trackDisplayNumbers,
   playlistId,
   isUserPlaylist,
   onTrackRemoved,
@@ -390,6 +395,7 @@ export default function TrackList({
             key={`${track.id}-${index}`}
             track={track}
             index={index}
+            displayNumber={trackDisplayNumbers?.[index]}
             gridCols={gridCols}
             showCover={showCover}
             showArtist={showArtist}

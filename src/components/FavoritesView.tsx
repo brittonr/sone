@@ -1,5 +1,5 @@
 import { Heart } from "lucide-react";
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from "react";
 import { useAtomValue } from "jotai";
 import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useAuth } from "../hooks/useAuth";
@@ -90,8 +90,10 @@ export default function FavoritesView({ onBack }: FavoritesViewProps) {
         const page = await getFavoriteTracks(userId, offsetRef.current, PAGE_SIZE);
         if (cancelledRef.current) return;
 
-        setAllTracks((prev) => [...prev, ...page.items]);
-        setTotalTracks(page.totalNumberOfItems);
+        startTransition(() => {
+          setAllTracks((prev) => [...prev, ...page.items]);
+          setTotalTracks(page.totalNumberOfItems);
+        });
         offsetRef.current += page.items.length;
         hasMoreRef.current = offsetRef.current < page.totalNumberOfItems;
       }
@@ -133,35 +135,43 @@ export default function FavoritesView({ onBack }: FavoritesViewProps) {
 
   // Local search / filter (debounce handled inside DebouncedFilterInput)
   const [searchQuery, setSearchQuery] = useState("");
+  const isFiltering = searchQuery.trim().length > 0;
 
-  const filteredTracks = useMemo(() => {
+  const { filteredTracks, displayNumbers } = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return tracks;
-    return tracks.filter(
-      (t) =>
+    if (!q) return { filteredTracks: tracks, displayNumbers: undefined };
+    const filtered: Track[] = [];
+    const numbers: number[] = [];
+    tracks.forEach((t, i) => {
+      if (
         t.title.toLowerCase().includes(q) ||
         (t.artist?.name?.toLowerCase().includes(q)) ||
         (t.album?.title?.toLowerCase().includes(q))
-    );
+      ) {
+        filtered.push(t);
+        numbers.push(i + 1);
+      }
+    });
+    return { filteredTracks: filtered, displayNumbers: numbers };
   }, [tracks, searchQuery]);
 
   const handleSearchFocus = useCallback(() => {
     if (hasMoreRef.current && !bgFetchingRef.current) {
-      fetchRemaining();
+      setTimeout(() => fetchRemaining(), 0);
     }
   }, [fetchRemaining]);
 
-  const handlePlayTrack = async (track: Track, index: number) => {
+  const handlePlayTrack = async (track: Track, _index: number) => {
     try {
-      // Play immediately with what we have
-      const currentTracks = tracks;
-      setQueueTracks(currentTracks.slice(index + 1));
+      // Always queue from the full unfiltered list based on the track's original position
+      const originalIndex = tracks.findIndex((t) => t.id === track.id);
+      const queueStart = originalIndex >= 0 ? originalIndex + 1 : 0;
+      setQueueTracks(tracks.slice(queueStart));
       await playTrack(track);
 
       // Kick off background fetch for the rest if needed
       if (hasMoreRef.current && !bgFetchingRef.current) {
         await fetchRemaining();
-        // Update the queue with the full list now that everything is loaded
         const full = allTracksRef.current.filter((t) => favoriteTrackIds.has(t.id));
         const playedIndex = full.findIndex((t) => t.id === track.id);
         if (playedIndex >= 0) {
@@ -234,9 +244,10 @@ export default function FavoritesView({ onBack }: FavoritesViewProps) {
         <TrackList
           tracks={filteredTracks}
           onPlay={handlePlayTrack}
-          onLoadMore={loadMore}
-          hasMore={hasMore}
-          loadingMore={loadingMore}
+          onLoadMore={isFiltering ? undefined : loadMore}
+          hasMore={isFiltering ? false : hasMore}
+          loadingMore={isFiltering ? false : loadingMore}
+          trackDisplayNumbers={displayNumbers}
           showDateAdded={true}
           showArtist={true}
           showAlbum={true}
