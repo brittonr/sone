@@ -1033,17 +1033,20 @@ pub fn run() {
                     let _ = window.set_icon(icon);
                 }
 
-                // Enable hardware-accelerated rendering on Linux
+                // WebKitGTK rendering settings for Linux
                 #[cfg(target_os = "linux")]
                 {
                     use webkit2gtk::{WebViewExt, SettingsExt};
                     window.with_webview(|webview| {
                         let wv = webview.inner();
                         if let Some(settings) = wv.settings() {
+                            // Use OnDemand (default) — Always can cause severe lag
+                            // on dual-GPU systems (NVIDIA + iGPU) with WebKitGTK
                             settings.set_hardware_acceleration_policy(
-                                webkit2gtk::HardwareAccelerationPolicy::Always
+                                webkit2gtk::HardwareAccelerationPolicy::OnDemand
                             );
                             settings.set_enable_webgl(true);
+                            settings.set_enable_smooth_scrolling(true);
                         }
                     }).ok();
                 }
