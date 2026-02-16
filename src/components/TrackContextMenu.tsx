@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useToast } from "../contexts/ToastContext";
-import { usePlayback } from "../hooks/usePlayback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useFavorites } from "../hooks/useFavorites";
 import { useNavigation } from "../hooks/useNavigation";
 import { usePlaylists } from "../hooks/usePlaylists";
@@ -38,7 +38,7 @@ export default function TrackContextMenu({
   isUserPlaylist,
   onTrackRemoved,
 }: TrackContextMenuProps) {
-  const { addToQueue, playNextInQueue } = usePlayback();
+  const { addToQueue, playNextInQueue } = usePlaybackActions();
   const { favoriteTrackIds, addFavoriteTrack, removeFavoriteTrack } = useFavorites();
   const { navigateToTrackRadio } = useNavigation();
   const { removeTrackFromPlaylist } = usePlaylists();

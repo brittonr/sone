@@ -1,6 +1,8 @@
 import { Play, Pause, Music, Shuffle, MoreHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { usePlayback } from "../hooks/usePlayback";
+import { useAtomValue } from "jotai";
+import { isPlayingAtom, currentTrackAtom } from "../atoms/playback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { getMixItems } from "../api/tidal";
 import { type Track } from "../types";
 import TrackList from "./TrackList";
@@ -14,14 +16,10 @@ interface MixPageProps {
 }
 
 export default function MixPage({ mixId, mixInfo, onBack }: MixPageProps) {
-  const {
-    playTrack,
-    setQueueTracks,
-    currentTrack,
-    isPlaying,
-    pauseTrack,
-    resumeTrack,
-  } = usePlayback();
+  const isPlaying = useAtomValue(isPlayingAtom);
+  const currentTrack = useAtomValue(currentTrackAtom);
+  const { playTrack, setQueueTracks, pauseTrack, resumeTrack } =
+    usePlaybackActions();
 
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);

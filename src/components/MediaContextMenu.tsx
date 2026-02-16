@@ -10,7 +10,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useToast } from "../contexts/ToastContext";
 import { type MediaItemType, type Track } from "../types";
 import { fetchMediaTracks } from "../api/tidal";
-import { usePlayback } from "../hooks/usePlayback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useFavorites } from "../hooks/useFavorites";
 import { usePlaylists } from "../hooks/usePlaylists";
 import AddToPlaylistMenu from "./AddToPlaylistMenu";
@@ -31,7 +31,7 @@ export default function MediaContextMenu({
     setQueueTracks,
     addToQueue,
     playNextInQueue,
-  } = usePlayback();
+  } = usePlaybackActions();
   const {
     addFavoriteAlbum,
     removeFavoriteAlbum,

@@ -6,7 +6,7 @@ import {
   Clock,
 } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
-import { usePlayback } from "../hooks/usePlayback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useNavigation } from "../hooks/useNavigation";
 import { getSuggestions } from "../api/tidal";
 import { getTidalImageUrl, type DirectHitItem, type SuggestionTextItem, type Track } from "../types";
@@ -34,7 +34,7 @@ function saveHistory(history: string[]) {
 }
 
 export default function SearchBar() {
-  const { playTrack, setQueueTracks } = usePlayback();
+  const { playTrack, setQueueTracks } = usePlaybackActions();
   const {
     currentView,
     navigateToAlbum,

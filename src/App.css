@@ -29,6 +29,13 @@ body {
 body {
   min-width: 320px;
   background-color: var(--th-bg-base, #121212);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 #root {

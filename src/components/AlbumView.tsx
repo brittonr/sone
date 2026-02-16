@@ -8,7 +8,9 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { usePlayback } from "../hooks/usePlayback";
+import { useAtomValue } from "jotai";
+import { isPlayingAtom, currentTrackAtom } from "../atoms/playback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useFavorites } from "../hooks/useFavorites";
 import { getAlbumDetail, getAlbumTracks } from "../api/tidal";
 import { getTidalImageUrl, type Track, type AlbumDetail } from "../types";
@@ -39,14 +41,10 @@ export default function AlbumView({
   albumInfo,
   onBack,
 }: AlbumViewProps) {
-  const {
-    playTrack,
-    setQueueTracks,
-    currentTrack,
-    isPlaying,
-    pauseTrack,
-    resumeTrack,
-  } = usePlayback();
+  const isPlaying = useAtomValue(isPlayingAtom);
+  const currentTrack = useAtomValue(currentTrackAtom);
+  const { playTrack, setQueueTracks, pauseTrack, resumeTrack } =
+    usePlaybackActions();
   const { isAlbumFavorited, addFavoriteAlbum, removeFavoriteAlbum } =
     useFavorites();
 

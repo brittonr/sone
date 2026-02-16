@@ -1,6 +1,8 @@
 import { Play, Pause, Radio } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { usePlayback } from "../hooks/usePlayback";
+import { useAtomValue } from "jotai";
+import { isPlayingAtom, currentTrackAtom } from "../atoms/playback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { getTrackRadio } from "../api/tidal";
 import { getTidalImageUrl, type Track } from "../types";
 import TidalImage from "./TidalImage";
@@ -18,14 +20,10 @@ export default function TrackRadioPage({
   trackInfo,
   onBack,
 }: TrackRadioPageProps) {
-  const {
-    playTrack,
-    setQueueTracks,
-    currentTrack,
-    isPlaying,
-    pauseTrack,
-    resumeTrack,
-  } = usePlayback();
+  const isPlaying = useAtomValue(isPlayingAtom);
+  const currentTrack = useAtomValue(currentTrackAtom);
+  const { playTrack, setQueueTracks, pauseTrack, resumeTrack } =
+    usePlaybackActions();
 
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);

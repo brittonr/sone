@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { usePlayback } from "../hooks/usePlayback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useNavigation } from "../hooks/useNavigation";
 import { getPageSection } from "../api/tidal";
 import { type MediaItemType } from "../types";
@@ -23,7 +23,7 @@ export default function ViewAllPage({
   title,
   apiPath,
 }: ViewAllPageProps) {
-  const { playTrack, setQueueTracks } = usePlayback();
+  const { playTrack, setQueueTracks } = usePlaybackActions();
   const { navigateToAlbum, navigateToPlaylist } = useNavigation();
 
   const [items, setItems] = useState<any[]>([]);

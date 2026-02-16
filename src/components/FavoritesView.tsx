@@ -1,6 +1,6 @@
 import { Heart } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { usePlayback } from "../hooks/usePlayback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useAuth } from "../hooks/useAuth";
 import { getFavoriteTracks } from "../api/tidal";
 import { type Track } from "../types";
@@ -15,7 +15,7 @@ const PAGE_SIZE = 50;
 
 export default function FavoritesView({ onBack }: FavoritesViewProps) {
   const { authTokens } = useAuth();
-  const { playTrack, setQueueTracks } = usePlayback();
+  const { playTrack, setQueueTracks } = usePlaybackActions();
 
   const [tracks, setTracks] = useState<Track[]>([]);
   const [totalTracks, setTotalTracks] = useState(0);

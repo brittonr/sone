@@ -1,6 +1,8 @@
 import { Play, Pause, Music, X, Shuffle, Heart, Loader2, MoreHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { usePlayback } from "../hooks/usePlayback";
+import { useAtomValue } from "jotai";
+import { isPlayingAtom, currentTrackAtom } from "../atoms/playback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useFavorites } from "../hooks/useFavorites";
 import { getPlaylistTracks } from "../api/tidal";
 import { getTidalImageUrl, type Track } from "../types";
@@ -27,14 +29,10 @@ export default function PlaylistView({
   playlistInfo,
   onBack,
 }: PlaylistViewProps) {
-  const {
-    playTrack,
-    setQueueTracks,
-    currentTrack,
-    isPlaying,
-    pauseTrack,
-    resumeTrack,
-  } = usePlayback();
+  const isPlaying = useAtomValue(isPlayingAtom);
+  const currentTrack = useAtomValue(currentTrackAtom);
+  const { playTrack, setQueueTracks, pauseTrack, resumeTrack } =
+    usePlaybackActions();
 
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);

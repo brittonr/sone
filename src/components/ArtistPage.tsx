@@ -1,6 +1,8 @@
 import { Play, Pause, User, Music, X } from "lucide-react";
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { usePlayback } from "../hooks/usePlayback";
+import { useAtomValue } from "jotai";
+import { isPlayingAtom, currentTrackAtom } from "../atoms/playback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useNavigation } from "../hooks/useNavigation";
 import {
   getArtistDetail,
@@ -50,14 +52,10 @@ export default function ArtistPage({
   artistInfo,
   onBack,
 }: ArtistPageProps) {
-  const {
-    playTrack,
-    setQueueTracks,
-    currentTrack,
-    isPlaying,
-    pauseTrack,
-    resumeTrack,
-  } = usePlayback();
+  const isPlaying = useAtomValue(isPlayingAtom);
+  const currentTrack = useAtomValue(currentTrackAtom);
+  const { playTrack, setQueueTracks, pauseTrack, resumeTrack } =
+    usePlaybackActions();
   const { navigateToAlbum } = useNavigation();
 
   const [topTracks, setTopTracks] = useState<Track[]>([]);

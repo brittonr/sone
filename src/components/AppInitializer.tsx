@@ -4,13 +4,12 @@
  * Centralises all one-time and global side-effects so they execute exactly
  * once, regardless of how many components import the domain hooks.
  *
- * Previously these effects lived inside useAuth, usePlayback, useFavorites,
- * and useNavigation — but because those hooks are called from many components,
- * each mount duplicated the effects (e.g. load_saved_auth called 6+ times).
+ * Uses usePlaybackActions() (zero-subscription) for all action callbacks,
+ * and useAtomValue() only for atoms that must be read reactively.
  */
 
 import { useEffect, useRef } from "react";
-import { useSetAtom } from "jotai";
+import { useSetAtom, useAtomValue, useStore } from "jotai";
 import { invoke } from "@tauri-apps/api/core";
 
 // Atoms — write-only setters (no re-render from reading)
@@ -23,13 +22,15 @@ import { userPlaylistsAtom, favoritePlaylistsAtom } from "../atoms/playlists";
 import { favoriteTrackIdsAtom } from "../atoms/favorites";
 import { currentViewAtom } from "../atoms/navigation";
 import {
+  isPlayingAtom,
   currentTrackAtom,
   queueAtom,
   historyAtom,
+  volumeAtom,
 } from "../atoms/playback";
 
-// Playback hook — for action functions (playNext, pauseTrack, etc.)
-import { usePlayback } from "../hooks/usePlayback";
+// Stable action callbacks (no atom subscriptions)
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 
 import type { AuthTokens, Playlist, Track, PlaybackSnapshot } from "../types";
 
@@ -49,19 +50,16 @@ export function AppInitializer() {
   const setQueue = useSetAtom(queueAtom);
   const setHistory = useSetAtom(historyAtom);
 
-  // ---- Playback state + actions (from hook) ----
-  const {
-    isPlaying,
-    currentTrack,
-    volume,
-    queue,
-    history,
-    playNext,
-    playPrevious,
-    pauseTrack,
-    resumeTrack,
-    setVolume,
-  } = usePlayback();
+  // ---- Stable playback actions (no subscriptions) ----
+  const { playNext, playPrevious, pauseTrack, resumeTrack, setVolume } =
+    usePlaybackActions();
+
+  // ---- Read only the atoms we NEED to react to ----
+  const isPlaying = useAtomValue(isPlayingAtom);
+  const currentTrack = useAtomValue(currentTrackAtom);
+
+  // ---- Store for one-time reads (volume, queue, history) — no subscription ----
+  const store = useStore();
 
   // ---- Navigation ----
   const setCurrentView = useSetAtom(currentViewAtom);
@@ -208,40 +206,58 @@ export function AppInitializer() {
   }, []);
 
   // ================================================================
-  //  VOLUME SYNC to backend (one-time)
-  //  atomWithStorage restores volume from localStorage synchronously,
-  //  but we still need to push it to the Tauri audio backend.
+  //  VOLUME SYNC to backend (one-time, reads volume from store)
   // ================================================================
   useEffect(() => {
     if (!volumeSyncedRef.current) {
       volumeSyncedRef.current = true;
-      invoke("set_volume", { level: volume }).catch(() => {});
+      const vol = store.get(volumeAtom);
+      invoke("set_volume", { level: vol }).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ================================================================
   //  PLAYBACK PERSISTENCE (reactive — persists on every state change)
+  //  Uses store.sub() to listen for changes without React re-renders.
   // ================================================================
   useEffect(() => {
+    // Wait until restore has run
     if (!hasRestoredPlaybackRef.current) return;
 
-    // Skip the first change after restore to avoid writing back the same data
-    if (!playbackPersistReady.current) {
-      playbackPersistReady.current = true;
-      return;
-    }
+    const persist = () => {
+      if (!playbackPersistReady.current) {
+        playbackPersistReady.current = true;
+        return;
+      }
+      const snapshot: PlaybackSnapshot = {
+        currentTrack: store.get(currentTrackAtom),
+        queue: store.get(queueAtom),
+        history: store.get(historyAtom),
+      };
+      try {
+        localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(snapshot));
+      } catch (err) {
+        console.error("Failed to persist playback state:", err);
+      }
+    };
 
-    const snapshot: PlaybackSnapshot = { currentTrack, queue, history };
-    try {
-      localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(snapshot));
-    } catch (err) {
-      console.error("Failed to persist playback state:", err);
-    }
-  }, [currentTrack, queue, history]);
+    // Subscribe directly to the atoms we care about — no React re-render
+    const unsub1 = store.sub(currentTrackAtom, persist);
+    const unsub2 = store.sub(queueAtom, persist);
+    const unsub3 = store.sub(historyAtom, persist);
+
+    return () => {
+      unsub1();
+      unsub2();
+      unsub3();
+    };
+  }, [store]);
 
   // ================================================================
   //  AUTO-PLAY next track when current finishes
+  //  Only depends on isPlaying + currentTrack (both read via useAtomValue).
+  //  playNext is stable (from usePlaybackActions).
   // ================================================================
   useEffect(() => {
     if (!isPlaying || !currentTrack) return;
@@ -250,7 +266,7 @@ export function AppInitializer() {
       try {
         const finished = await invoke<boolean>("is_track_finished");
         if (finished) {
-          playNext(); // plays next track, or sets isPlaying=false when queue is empty
+          playNext();
         }
       } catch (err) {
         console.error("Failed to check track status:", err);
@@ -258,10 +274,13 @@ export function AppInitializer() {
     }, 1000);
 
     return () => clearInterval(id);
-  }, [isPlaying, currentTrack, queue, playNext]);
+  }, [isPlaying, currentTrack, playNext]);
 
   // ================================================================
   //  KEYBOARD SHORTCUTS
+  //  All action callbacks are stable (from usePlaybackActions),
+  //  so this effect only re-registers when isPlaying changes.
+  //  Volume is read from store at call-time, not from a subscription.
   // ================================================================
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -275,7 +294,7 @@ export function AppInitializer() {
       switch (e.code) {
         case "Space":
           e.preventDefault();
-          if (isPlaying) {
+          if (store.get(isPlayingAtom)) {
             pauseTrack();
           } else {
             resumeTrack();
@@ -291,26 +310,18 @@ export function AppInitializer() {
           break;
         case "ArrowUp":
           e.preventDefault();
-          setVolume(Math.min(1.0, volume + 0.1));
+          setVolume(Math.min(1.0, store.get(volumeAtom) + 0.1));
           break;
         case "ArrowDown":
           e.preventDefault();
-          setVolume(Math.max(0.0, volume - 0.1));
+          setVolume(Math.max(0.0, store.get(volumeAtom) - 0.1));
           break;
       }
     };
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [
-    isPlaying,
-    volume,
-    playNext,
-    playPrevious,
-    pauseTrack,
-    resumeTrack,
-    setVolume,
-  ]);
+  }, [store, playNext, playPrevious, pauseTrack, resumeTrack, setVolume]);
 
   // ================================================================
   //  POPSTATE (browser back/forward navigation)

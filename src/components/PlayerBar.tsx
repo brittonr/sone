@@ -23,7 +23,7 @@ import {
   streamInfoAtom,
 } from "../atoms/playback";
 import { favoriteTrackIdsAtom } from "../atoms/favorites";
-import { usePlayback } from "../hooks/usePlayback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useFavorites } from "../hooks/useFavorites";
 import { useDrawer } from "../hooks/useDrawer";
 
@@ -108,7 +108,7 @@ const FavoriteButton = memo(function FavoriteButton() {
 const ProgressScrubber = memo(function ProgressScrubber() {
   const currentTrack = useAtomValue(currentTrackAtom);
   const isPlaying = useAtomValue(isPlayingAtom);
-  const { getPlaybackPosition, seekTo } = usePlayback();
+  const { getPlaybackPosition, seekTo } = usePlaybackActions();
 
   const [currentTime, setCurrentTime] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -260,7 +260,7 @@ const ProgressScrubber = memo(function ProgressScrubber() {
 
 const TransportControls = memo(function TransportControls() {
   const isPlaying = useAtomValue(isPlayingAtom);
-  const { pauseTrack, resumeTrack, playNext, playPrevious } = usePlayback();
+  const { pauseTrack, resumeTrack, playNext, playPrevious } = usePlaybackActions();
 
   const [isShuffle, setIsShuffle] = useState(false);
   const [repeatMode, setRepeatMode] = useState(0);
@@ -383,7 +383,7 @@ const QualityBadge = memo(function QualityBadge() {
 
 const VolumeSlider = memo(function VolumeSlider() {
   const volume = useAtomValue(volumeAtom);
-  const { setVolume } = usePlayback();
+  const { setVolume } = usePlaybackActions();
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setVolume(parseFloat(e.target.value));

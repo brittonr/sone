@@ -13,8 +13,15 @@ import {
   GripVertical,
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback, memo } from "react";
+import { useAtomValue } from "jotai";
 import { invoke } from "@tauri-apps/api/core";
-import { usePlayback } from "../hooks/usePlayback";
+import {
+  isPlayingAtom,
+  currentTrackAtom,
+  queueAtom,
+  historyAtom,
+} from "../atoms/playback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useDrawer } from "../hooks/useDrawer";
 import { useFavorites } from "../hooks/useFavorites";
 import { useNavigation } from "../hooks/useNavigation";
@@ -41,15 +48,11 @@ const TABS: { id: TabId; label: string; icon: typeof ListMusic }[] = [
 // ─── Queue Tab ───────────────────────────────────────────────────────────────
 
 const QueueTab = memo(function QueueTab() {
-  const {
-    currentTrack,
-    queue,
-    history,
-    isPlaying,
-    playTrack,
-    setQueueTracks,
-    removeFromQueue,
-  } = usePlayback();
+  const currentTrack = useAtomValue(currentTrackAtom);
+  const queue = useAtomValue(queueAtom);
+  const history = useAtomValue(historyAtom);
+  const isPlaying = useAtomValue(isPlayingAtom);
+  const { playTrack, setQueueTracks, removeFromQueue } = usePlaybackActions();
   const { favoriteTrackIds, addFavoriteTrack, removeFavoriteTrack } =
     useFavorites();
   const { navigateToArtist, navigateToAlbum } = useNavigation();
@@ -501,7 +504,8 @@ function SuggestedTrackRow({
 }
 
 const SuggestedTab = memo(function SuggestedTab() {
-  const { currentTrack, playTrack, addToQueue } = usePlayback();
+  const currentTrack = useAtomValue(currentTrackAtom);
+  const { playTrack, addToQueue } = usePlaybackActions();
   const { favoriteTrackIds, addFavoriteTrack, removeFavoriteTrack } =
     useFavorites();
   const { navigateToArtist, navigateToAlbum } = useNavigation();
@@ -715,7 +719,9 @@ const LyricsLine = memo(function LyricsLine({
 });
 
 function LyricsTab({ isVisible }: { isVisible: boolean }) {
-  const { currentTrack, isPlaying, getPlaybackPosition } = usePlayback();
+  const currentTrack = useAtomValue(currentTrackAtom);
+  const isPlaying = useAtomValue(isPlayingAtom);
+  const { getPlaybackPosition } = usePlaybackActions();
   const [lyrics, setLyrics] = useState<Lyrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -910,7 +916,7 @@ function LyricsTab({ isVisible }: { isVisible: boolean }) {
 // ─── Credits Tab ─────────────────────────────────────────────────────────────
 
 const CreditsTab = memo(function CreditsTab() {
-  const { currentTrack } = usePlayback();
+  const currentTrack = useAtomValue(currentTrackAtom);
   const [credits, setCredits] = useState<Credit[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1304,7 +1310,7 @@ function _useDominantColor(imageUrl: string | undefined) {
 }
 
 export default function NowPlayingDrawer() {
-  const { currentTrack } = usePlayback();
+  const currentTrack = useAtomValue(currentTrackAtom);
   const { drawerOpen, setDrawerOpen, drawerTab, setDrawerTab } = useDrawer();
   const activeTab = (drawerTab || "queue") as TabId;
   const setActiveTab = (tab: TabId) => setDrawerTab(tab);

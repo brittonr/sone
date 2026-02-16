@@ -7,7 +7,7 @@ import {
   User,
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
-import { usePlayback } from "../hooks/usePlayback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useNavigation } from "../hooks/useNavigation";
 import { searchTidal } from "../api/tidal";
 import {
@@ -46,7 +46,7 @@ interface SearchViewProps {
 }
 
 export default function SearchView({ query, onBack }: SearchViewProps) {
-  const { playTrack, setQueueTracks } = usePlayback();
+  const { playTrack, setQueueTracks } = usePlaybackActions();
   const {
     navigateToAlbum,
     navigateToPlaylist,

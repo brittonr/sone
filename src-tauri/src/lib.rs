@@ -1023,15 +1023,29 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
-            // Set window icon at runtime (needed for dev mode taskbar icon)
             if let Some(window) = app.get_webview_window("main") {
+                // Set window icon at runtime (needed for dev mode taskbar icon)
                 let icon_bytes = include_bytes!("../icons/icon.png");
-                // Manually decode the PNG to RGBA to ensure it works
                 if let Ok(image) = image::load_from_memory(icon_bytes) {
                     let rgba = image.to_rgba8();
                     let (width, height) = rgba.dimensions();
                     let icon = tauri::image::Image::new(rgba.as_raw(), width, height);
                     let _ = window.set_icon(icon);
+                }
+
+                // Enable hardware-accelerated rendering on Linux
+                #[cfg(target_os = "linux")]
+                {
+                    use webkit2gtk::{WebViewExt, SettingsExt};
+                    window.with_webview(|webview| {
+                        let wv = webview.inner();
+                        if let Some(settings) = wv.settings() {
+                            settings.set_hardware_acceleration_policy(
+                                webkit2gtk::HardwareAccelerationPolicy::Always
+                            );
+                            settings.set_enable_webgl(true);
+                        }
+                    }).ok();
                 }
             }
             Ok(())

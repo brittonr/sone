@@ -4417,6 +4417,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tokio",
  "walkdir",
+ "webkit2gtk",
 ]
 
 [[package]]

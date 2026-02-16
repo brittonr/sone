@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback } from "react";
 import { Play, ChevronLeft, ChevronRight, Music, MoreHorizontal } from "lucide-react";
-import { usePlayback } from "../hooks/usePlayback";
+import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useNavigation } from "../hooks/useNavigation";
 import {
   type HomeSection as HomeSectionType,
@@ -24,7 +24,7 @@ interface HomeSectionProps {
 }
 
 export default function HomeSection({ section }: HomeSectionProps) {
-  const { playTrack, setQueueTracks } = usePlayback();
+  const { playTrack, setQueueTracks } = usePlaybackActions();
   const {
     navigateToAlbum,
     navigateToPlaylist,
@@ -249,7 +249,7 @@ function TrackListSection({
   section: HomeSectionType;
   items: any[];
 }) {
-  const { playTrack, setQueueTracks } = usePlayback();
+  const { playTrack, setQueueTracks } = usePlaybackActions();
   const { navigateToAlbum, navigateToArtist, navigateToViewAll } = useNavigation();
   const [trackContextMenu, setTrackContextMenu] = useState<{
     track: any;
