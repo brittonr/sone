@@ -23,6 +23,16 @@ import {
 import { getTrackRadio } from "../api/tidal";
 import type { Track, StreamInfo } from "../types";
 
+/** Normalize a raw track-like object into a proper Track.
+ *  Handles the artist/artists mismatch from different API endpoints. */
+function normalizeTrack(raw: any): Track {
+  const track = { ...raw } as Track;
+  if (!track.artist && raw.artists?.[0]) {
+    track.artist = raw.artists[0];
+  }
+  return track;
+}
+
 export function usePlaybackActions() {
   const store = useStore();
 
@@ -33,11 +43,12 @@ export function usePlaybackActions() {
         if (current) {
           store.set(historyAtom, [...store.get(historyAtom), current]);
         }
+        const normalized = normalizeTrack(track);
         const info = await invoke<StreamInfo>("play_tidal_track", {
-          trackId: track.id,
+          trackId: normalized.id,
         });
         store.set(streamInfoAtom, info);
-        store.set(currentTrackAtom, track);
+        store.set(currentTrackAtom, normalized);
         store.set(isPlayingAtom, true);
       } catch (error: any) {
         console.error("Failed to play track:", error);
@@ -106,21 +117,21 @@ export function usePlaybackActions() {
 
   const addToQueue = useCallback(
     (track: Track) => {
-      store.set(queueAtom, [...store.get(queueAtom), track]);
+      store.set(queueAtom, [...store.get(queueAtom), normalizeTrack(track)]);
     },
     [store]
   );
 
   const playNextInQueue = useCallback(
     (track: Track) => {
-      store.set(queueAtom, [track, ...store.get(queueAtom)]);
+      store.set(queueAtom, [normalizeTrack(track), ...store.get(queueAtom)]);
     },
     [store]
   );
 
   const setQueueTracks = useCallback(
     (tracks: Track[]) => {
-      store.set(queueAtom, tracks);
+      store.set(queueAtom, tracks.map(normalizeTrack));
     },
     [store]
   );

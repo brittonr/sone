@@ -2213,20 +2213,33 @@ impl TidalClient {
             // but keep the item type info by merging it
             let unwrapped: Vec<Value> = raw.iter()
                 .filter_map(|item| {
-                    if let Some(data) = item.get("data") {
-                        // Merge item-level type into data for identification
-                        let mut merged = data.clone();
-                        if let Some(obj) = merged.as_object_mut() {
-                            if let Some(item_type) = item.get("type").and_then(|t| t.as_str()) {
-                                obj.entry("_itemType".to_string())
-                                    .or_insert(Value::String(item_type.to_string()));
-                            }
-                        }
-                        Some(merged)
+                    let item_type = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    let base = if let Some(data) = item.get("data") {
+                        data.clone()
                     } else {
-                        // No "data" wrapper — item is already flat
-                        Some(item.clone())
+                        item.clone()
+                    };
+
+                    // For tracks, round-trip through TidalTrack to backfill artist
+                    let mut merged = if item_type == "TRACK" {
+                        if let Ok(mut track) = serde_json::from_value::<TidalTrack>(base.clone()) {
+                            track.backfill_artist();
+                            serde_json::to_value(&track).unwrap_or(base)
+                        } else {
+                            base
+                        }
+                    } else {
+                        base
+                    };
+
+                    // Merge item-level type into data for identification
+                    if let Some(obj) = merged.as_object_mut() {
+                        if !item_type.is_empty() {
+                            obj.entry("_itemType".to_string())
+                                .or_insert(Value::String(item_type.to_string()));
+                        }
                     }
+                    Some(merged)
                 })
                 .collect();
             Value::Array(unwrapped)
@@ -2452,7 +2465,16 @@ impl TidalClient {
         // Response format: { items: [ { item: { id, title, artist, album, ... }, created: "..." } ] }
         if let Some(items) = json.get("items").and_then(|i| i.as_array()) {
             let tracks: Vec<Value> = items.iter()
-                .filter_map(|entry| entry.get("item").cloned())
+                .filter_map(|entry| {
+                    let item = entry.get("item")?;
+                    // Deserialize → backfill artist → re-serialize to ensure artist field is set
+                    if let Ok(mut track) = serde_json::from_value::<TidalTrack>(item.clone()) {
+                        track.backfill_artist();
+                        serde_json::to_value(&track).ok()
+                    } else {
+                        Some(item.clone())
+                    }
+                })
                 .collect();
             log::debug!("[listening_history]: got {} tracks", tracks.len());
             Ok(Value::Array(tracks))
@@ -2483,9 +2505,11 @@ impl TidalClient {
         let json: Value = serde_json::from_str(&body)
             .map_err(|e| SoneError::Parse(e.to_string()))?;
         if let Some(items) = json.get("items").and_then(|i| i.as_array()) {
-            Ok(items.iter()
+            let mut tracks: Vec<TidalTrack> = items.iter()
                 .filter_map(|entry| entry.get("item").and_then(|item| serde_json::from_value::<TidalTrack>(item.clone()).ok()))
-                .collect())
+                .collect();
+            for t in &mut tracks { t.backfill_artist(); }
+            Ok(tracks)
         } else {
             Ok(vec![])
         }
