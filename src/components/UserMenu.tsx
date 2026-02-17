@@ -1,7 +1,7 @@
 import { LogOut, Palette, RefreshCw, User, Keyboard, X } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../hooks/useAuth";
-import { clearCache } from "../api/tidal";
+import { clearAllCache } from "../api/tidal";
 import ThemeEditor from "./ThemeEditor";
 
 const SHORTCUTS = [
@@ -84,8 +84,8 @@ export default function UserMenu() {
 
           {/* Refresh */}
           <button
-            onClick={() => {
-              clearCache();
+            onClick={async () => {
+              await clearAllCache();
               setOpen(false);
               window.location.reload();
             }}

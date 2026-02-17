@@ -330,11 +330,7 @@ pub async fn logout(state: State<'_, AppState>) -> Result<(), SoneError> {
     }
 
     // Clear all cached data
-    if let Ok(entries) = fs::read_dir(&state.cache_dir) {
-        for entry in entries.flatten() {
-            fs::remove_file(entry.path()).ok();
-        }
-    }
+    state.disk_cache.clear().await;
 
     Ok(())
 }

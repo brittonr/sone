@@ -1,4 +1,5 @@
 mod audio;
+pub mod cache;
 mod commands;
 mod error;
 mod tidal_api;
@@ -6,6 +7,7 @@ mod tidal_api;
 pub use error::SoneError;
 
 use audio::AudioPlayer;
+use cache::DiskCache;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -26,21 +28,12 @@ pub struct Settings {
     pub client_secret: String,
 }
 
-const CACHE_TTL_SECS: u64 = 12 * 60 * 60; // 12 hours
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct CacheMeta {
-    #[serde(default)]
-    pub home_page_ts: u64,
-    #[serde(default)]
-    pub favorite_artists_ts: u64,
-}
-
 pub struct AppState {
     pub audio_player: AudioPlayer,
     pub tidal_client: Mutex<TidalClient>,
     pub settings_path: PathBuf,
     pub cache_dir: PathBuf,
+    pub disk_cache: DiskCache,
 }
 
 pub fn now_secs() -> u64 {
@@ -61,11 +54,14 @@ impl AppState {
         let cache_dir = config_dir.join("cache");
         fs::create_dir_all(&cache_dir).ok();
 
+        let disk_cache = DiskCache::new(cache_dir.join("v2"));
+
         Self {
             audio_player: AudioPlayer::new(app_handle),
             tidal_client: Mutex::new(TidalClient::new()),
             settings_path,
             cache_dir,
+            disk_cache,
         }
     }
 
@@ -83,38 +79,17 @@ impl AppState {
         Ok(())
     }
 
-    // ---- Cache helpers ----
+    // ---- Persistent state (not cache — survives restarts) ----
 
-    pub fn load_cache_meta(&self) -> CacheMeta {
-        let path = self.cache_dir.join("cache_meta.json");
-        if let Ok(content) = fs::read_to_string(&path) {
-            serde_json::from_str(&content).unwrap_or_default()
-        } else {
-            CacheMeta::default()
-        }
-    }
-
-    pub fn save_cache_meta(&self, meta: &CacheMeta) -> Result<(), SoneError> {
-        let path = self.cache_dir.join("cache_meta.json");
-        let json = serde_json::to_string_pretty(meta)?;
-        fs::write(&path, json)?;
-        Ok(())
-    }
-
-    pub fn read_cache_file(&self, name: &str) -> Option<String> {
+    pub fn read_state_file(&self, name: &str) -> Option<String> {
         let path = self.cache_dir.join(name);
         fs::read_to_string(&path).ok()
     }
 
-    pub fn write_cache_file(&self, name: &str, content: &str) -> Result<(), SoneError> {
+    pub fn write_state_file(&self, name: &str, content: &str) -> Result<(), SoneError> {
         let path = self.cache_dir.join(name);
         fs::write(&path, content)?;
         Ok(())
-    }
-
-    pub fn is_cache_fresh(&self, timestamp: u64) -> bool {
-        let now = now_secs();
-        now.saturating_sub(timestamp) < CACHE_TTL_SECS
     }
 }
 
@@ -226,6 +201,8 @@ pub fn run() {
             commands::playback::load_playback_queue,
             // utility
             commands::utility::get_image_bytes,
+            commands::utility::get_cache_stats,
+            commands::utility::clear_disk_cache,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -85,7 +85,7 @@ impl TidalAlbumDetail {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PaginatedTracks {
     pub items: Vec<TidalTrack>,
@@ -135,7 +135,7 @@ pub struct TidalPlaylistRaw {
     pub creator: Option<TidalPlaylistCreator>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TidalPlaylist {
     pub uuid: String,

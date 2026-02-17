@@ -1,9 +1,9 @@
 use serde::Serialize;
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::AppState;
 use crate::SoneError;
-use crate::now_secs;
+use crate::cache::{CacheResult, CacheTier};
 use crate::tidal_api::{HomePageResponse, PaginatedTracks, TidalAlbumDetail, TidalArtistDetail, TidalTrack};
 
 #[derive(Debug, Serialize, Clone)]
@@ -16,8 +16,34 @@ pub struct HomePageCached {
 #[tauri::command(rename_all = "camelCase")]
 pub async fn get_album_detail(state: State<'_, AppState>, album_id: u64) -> Result<TidalAlbumDetail, SoneError> {
     log::debug!("[get_album_detail]: album_id={}", album_id);
+
+    let cache_key = format!("album:{}", album_id);
+    match state.disk_cache.get(&cache_key, CacheTier::StaticMeta).await {
+        CacheResult::Fresh(bytes) => {
+            if let Ok(detail) = serde_json::from_slice(&bytes) {
+                return Ok(detail);
+            }
+        }
+        CacheResult::Stale(bytes) => {
+            if let Ok(detail) = serde_json::from_slice::<TidalAlbumDetail>(&bytes) {
+                // Static metadata — no SWR refresh needed (7-day TTL is generous).
+                return Ok(detail);
+            }
+        }
+        CacheResult::Miss => {}
+    }
+
     let mut client = state.tidal_client.lock().await;
-    client.get_album_detail(album_id).await
+    let detail = client.get_album_detail(album_id).await?;
+    drop(client);
+
+    if let Ok(json) = serde_json::to_vec(&detail) {
+        state.disk_cache
+            .put(&cache_key, &json, CacheTier::StaticMeta, &["album", &format!("album:{}", album_id)])
+            .await
+            .ok();
+    }
+    Ok(detail)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -28,37 +54,88 @@ pub async fn get_album_tracks(
     limit: u32,
 ) -> Result<PaginatedTracks, SoneError> {
     log::debug!("[get_album_tracks]: album_id={}, offset={}, limit={}", album_id, offset, limit);
+
+    let cache_key = format!("album-tracks:{}:{}:{}", album_id, offset, limit);
+    match state.disk_cache.get(&cache_key, CacheTier::StaticMeta).await {
+        CacheResult::Fresh(bytes) | CacheResult::Stale(bytes) => {
+            if let Ok(tracks) = serde_json::from_slice(&bytes) {
+                return Ok(tracks);
+            }
+        }
+        CacheResult::Miss => {}
+    }
+
     let mut client = state.tidal_client.lock().await;
-    client.get_album_tracks(album_id, offset, limit).await
+    let tracks = client.get_album_tracks(album_id, offset, limit).await?;
+    drop(client);
+
+    if let Ok(json) = serde_json::to_vec(&tracks) {
+        state.disk_cache
+            .put(&cache_key, &json, CacheTier::StaticMeta, &["album-tracks", &format!("album:{}", album_id)])
+            .await
+            .ok();
+    }
+    Ok(tracks)
 }
 
 #[tauri::command]
-pub async fn get_home_page(state: State<'_, AppState>) -> Result<HomePageCached, SoneError> {
+pub async fn get_home_page(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<HomePageCached, SoneError> {
     log::debug!("[get_home_page]");
-    let meta = state.load_cache_meta();
 
-    // Try to serve from cache first
-    if meta.home_page_ts > 0 {
-        if let Some(cached) = state.read_cache_file("home_page.json") {
-            if let Ok(home) = serde_json::from_str::<HomePageResponse>(&cached) {
-                let is_stale = !state.is_cache_fresh(meta.home_page_ts);
-                return Ok(HomePageCached { home, is_stale });
+    let cache_key = "home_page";
+    match state.disk_cache.get(cache_key, CacheTier::Dynamic).await {
+        CacheResult::Fresh(bytes) => {
+            if let Ok(home) = serde_json::from_slice(&bytes) {
+                return Ok(HomePageCached { home, is_stale: false });
             }
         }
+        CacheResult::Stale(bytes) => {
+            if let Ok(home) = serde_json::from_slice::<HomePageResponse>(&bytes) {
+                // SWR: return stale data, refresh in background.
+                if state.disk_cache.mark_in_flight(cache_key).await {
+                    // Only retry if last attempt was >5min ago (300s)
+                    if state.disk_cache.should_retry_refresh(cache_key, 300).await {
+                        state.disk_cache.mark_refresh_attempt(cache_key).await;
+                        let handle = app_handle.clone();
+                        tokio::spawn(async move {
+                            let st = handle.state::<AppState>();
+                            let result = {
+                                let mut client = st.tidal_client.lock().await;
+                                client.get_home_page().await
+                            };
+                            if let Ok(fresh) = result {
+                                if let Ok(json) = serde_json::to_vec(&fresh) {
+                                    st.disk_cache
+                                        .put(cache_key, &json, CacheTier::Dynamic, &["home-page"])
+                                        .await
+                                        .ok();
+                                }
+                            }
+                            st.disk_cache.clear_in_flight(cache_key).await;
+                        });
+                    } else {
+                        state.disk_cache.clear_in_flight(cache_key).await;
+                    }
+                }
+                return Ok(HomePageCached { home, is_stale: true });
+            }
+        }
+        CacheResult::Miss => {}
     }
 
-    // No valid cache — fetch fresh
     let mut client = state.tidal_client.lock().await;
     let home = client.get_home_page().await?;
+    drop(client);
 
-    // Cache the result
-    if let Ok(json) = serde_json::to_string(&home) {
-        state.write_cache_file("home_page.json", &json).ok();
-        let mut meta = state.load_cache_meta();
-        meta.home_page_ts = now_secs();
-        state.save_cache_meta(&meta).ok();
+    if let Ok(json) = serde_json::to_vec(&home) {
+        state.disk_cache
+            .put(cache_key, &json, CacheTier::Dynamic, &["home-page"])
+            .await
+            .ok();
     }
-
     Ok(HomePageCached { home, is_stale: false })
 }
 
@@ -67,62 +144,287 @@ pub async fn refresh_home_page(state: State<'_, AppState>) -> Result<HomePageRes
     log::debug!("[refresh_home_page]");
     let mut client = state.tidal_client.lock().await;
     let home = client.get_home_page().await?;
+    drop(client);
 
-    // Update cache
-    if let Ok(json) = serde_json::to_string(&home) {
-        state.write_cache_file("home_page.json", &json).ok();
-        let mut meta = state.load_cache_meta();
-        meta.home_page_ts = now_secs();
-        state.save_cache_meta(&meta).ok();
+    if let Ok(json) = serde_json::to_vec(&home) {
+        state.disk_cache
+            .put("home_page", &json, CacheTier::Dynamic, &["home-page"])
+            .await
+            .ok();
     }
-
     Ok(home)
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub async fn get_page_section(state: State<'_, AppState>, api_path: String) -> Result<HomePageResponse, SoneError> {
+pub async fn get_page_section(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    api_path: String,
+) -> Result<HomePageResponse, SoneError> {
     log::debug!("[get_page_section]: api_path={}", api_path);
+
+    let cache_key = format!("section:{}", api_path);
+    match state.disk_cache.get(&cache_key, CacheTier::Dynamic).await {
+        CacheResult::Fresh(bytes) => {
+            if let Ok(page) = serde_json::from_slice(&bytes) {
+                return Ok(page);
+            }
+        }
+        CacheResult::Stale(bytes) => {
+            if let Ok(page) = serde_json::from_slice::<HomePageResponse>(&bytes) {
+                if state.disk_cache.mark_in_flight(&cache_key).await {
+                    // Only retry if last attempt was >5min ago (300s)
+                    if state.disk_cache.should_retry_refresh(&cache_key, 300).await {
+                        state.disk_cache.mark_refresh_attempt(&cache_key).await;
+                        let handle = app_handle.clone();
+                        let path = api_path.clone();
+                        let key = cache_key.clone();
+                        tokio::spawn(async move {
+                            let st = handle.state::<AppState>();
+                            let result = {
+                                let mut client = st.tidal_client.lock().await;
+                                client.get_page(&path).await
+                            };
+                            if let Ok(fresh) = result {
+                                if let Ok(json) = serde_json::to_vec(&fresh) {
+                                    st.disk_cache
+                                        .put(&key, &json, CacheTier::Dynamic, &["section"])
+                                        .await
+                                        .ok();
+                                }
+                            }
+                            st.disk_cache.clear_in_flight(&key).await;
+                        });
+                    } else {
+                        state.disk_cache.clear_in_flight(&cache_key).await;
+                    }
+                }
+                return Ok(page);
+            }
+        }
+        CacheResult::Miss => {}
+    }
+
     let mut client = state.tidal_client.lock().await;
-    client.get_page(&api_path).await
+    let page = client.get_page(&api_path).await?;
+    drop(client);
+
+    if let Ok(json) = serde_json::to_vec(&page) {
+        state.disk_cache
+            .put(&cache_key, &json, CacheTier::Dynamic, &["section"])
+            .await
+            .ok();
+    }
+    Ok(page)
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn get_mix_items(state: State<'_, AppState>, mix_id: String) -> Result<Vec<TidalTrack>, SoneError> {
     log::debug!("[get_mix_items]: mix_id={}", mix_id);
+
+    let cache_key = format!("mix:{}", mix_id);
+    match state.disk_cache.get(&cache_key, CacheTier::Dynamic).await {
+        CacheResult::Fresh(bytes) | CacheResult::Stale(bytes) => {
+            if let Ok(items) = serde_json::from_slice(&bytes) {
+                return Ok(items);
+            }
+        }
+        CacheResult::Miss => {}
+    }
+
     let mut client = state.tidal_client.lock().await;
-    client.get_mix_items(&mix_id).await
+    let items = client.get_mix_items(&mix_id).await?;
+    drop(client);
+
+    if let Ok(json) = serde_json::to_vec(&items) {
+        state.disk_cache
+            .put(&cache_key, &json, CacheTier::Dynamic, &["mix"])
+            .await
+            .ok();
+    }
+    Ok(items)
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn get_artist_detail(state: State<'_, AppState>, artist_id: u64) -> Result<TidalArtistDetail, SoneError> {
     log::debug!("[get_artist_detail]: artist_id={}", artist_id);
+
+    let cache_key = format!("artist:{}", artist_id);
+    match state.disk_cache.get(&cache_key, CacheTier::StaticMeta).await {
+        CacheResult::Fresh(bytes) | CacheResult::Stale(bytes) => {
+            if let Ok(detail) = serde_json::from_slice(&bytes) {
+                return Ok(detail);
+            }
+        }
+        CacheResult::Miss => {}
+    }
+
     let mut client = state.tidal_client.lock().await;
-    client.get_artist_detail(artist_id).await
+    let detail = client.get_artist_detail(artist_id).await?;
+    drop(client);
+
+    if let Ok(json) = serde_json::to_vec(&detail) {
+        state.disk_cache
+            .put(&cache_key, &json, CacheTier::StaticMeta, &["artist", &format!("artist:{}", artist_id)])
+            .await
+            .ok();
+    }
+    Ok(detail)
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub async fn get_artist_top_tracks(state: State<'_, AppState>, artist_id: u64, limit: u32) -> Result<Vec<TidalTrack>, SoneError> {
+pub async fn get_artist_top_tracks(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    artist_id: u64,
+    limit: u32,
+) -> Result<Vec<TidalTrack>, SoneError> {
     log::debug!("[get_artist_top_tracks]: artist_id={}, limit={}", artist_id, limit);
+
+    let cache_key = format!("artist-tracks:{}:{}", artist_id, limit);
+    match state.disk_cache.get(&cache_key, CacheTier::Dynamic).await {
+        CacheResult::Fresh(bytes) => {
+            if let Ok(tracks) = serde_json::from_slice(&bytes) {
+                return Ok(tracks);
+            }
+        }
+        CacheResult::Stale(bytes) => {
+            if let Ok(tracks) = serde_json::from_slice::<Vec<TidalTrack>>(&bytes) {
+                if state.disk_cache.mark_in_flight(&cache_key).await {
+                    // Only retry if last attempt was >5min ago (300s)
+                    if state.disk_cache.should_retry_refresh(&cache_key, 300).await {
+                        state.disk_cache.mark_refresh_attempt(&cache_key).await;
+                        let handle = app_handle.clone();
+                        let key = cache_key.clone();
+                        tokio::spawn(async move {
+                            let st = handle.state::<AppState>();
+                            let result = {
+                                let mut client = st.tidal_client.lock().await;
+                                client.get_artist_top_tracks(artist_id, limit).await
+                            };
+                            if let Ok(fresh) = result {
+                                if let Ok(json) = serde_json::to_vec(&fresh) {
+                                    st.disk_cache
+                                        .put(&key, &json, CacheTier::Dynamic, &["artist-tracks", &format!("artist:{}", artist_id)])
+                                        .await
+                                        .ok();
+                                }
+                            }
+                            st.disk_cache.clear_in_flight(&key).await;
+                        });
+                    } else {
+                        state.disk_cache.clear_in_flight(&cache_key).await;
+                    }
+                }
+                return Ok(tracks);
+            }
+        }
+        CacheResult::Miss => {}
+    }
+
     let mut client = state.tidal_client.lock().await;
-    client.get_artist_top_tracks(artist_id, limit).await
+    let tracks = client.get_artist_top_tracks(artist_id, limit).await?;
+    drop(client);
+
+    if let Ok(json) = serde_json::to_vec(&tracks) {
+        state.disk_cache
+            .put(&cache_key, &json, CacheTier::Dynamic, &["artist-tracks", &format!("artist:{}", artist_id)])
+            .await
+            .ok();
+    }
+    Ok(tracks)
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn get_artist_albums(state: State<'_, AppState>, artist_id: u64, limit: u32) -> Result<Vec<TidalAlbumDetail>, SoneError> {
     log::debug!("[get_artist_albums]: artist_id={}, limit={}", artist_id, limit);
+
+    let cache_key = format!("artist-albums:{}:{}", artist_id, limit);
+    match state.disk_cache.get(&cache_key, CacheTier::StaticMeta).await {
+        CacheResult::Fresh(bytes) | CacheResult::Stale(bytes) => {
+            if let Ok(albums) = serde_json::from_slice(&bytes) {
+                return Ok(albums);
+            }
+        }
+        CacheResult::Miss => {}
+    }
+
     let mut client = state.tidal_client.lock().await;
-    client.get_artist_albums(artist_id, limit).await
+    let albums = client.get_artist_albums(artist_id, limit).await?;
+    drop(client);
+
+    if let Ok(json) = serde_json::to_vec(&albums) {
+        state.disk_cache
+            .put(&cache_key, &json, CacheTier::StaticMeta, &["artist-albums", &format!("artist:{}", artist_id)])
+            .await
+            .ok();
+    }
+    Ok(albums)
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub async fn get_artist_bio(state: State<'_, AppState>, artist_id: u64) -> Result<String, SoneError> {
+pub async fn get_artist_bio(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    artist_id: u64,
+) -> Result<String, SoneError> {
     log::debug!("[get_artist_bio]: artist_id={}", artist_id);
+
+    let cache_key = format!("artist-bio:{}", artist_id);
+    match state.disk_cache.get(&cache_key, CacheTier::Dynamic).await {
+        CacheResult::Fresh(bytes) => {
+            if let Ok(bio) = serde_json::from_slice(&bytes) {
+                return Ok(bio);
+            }
+        }
+        CacheResult::Stale(bytes) => {
+            if let Ok(bio) = serde_json::from_slice::<String>(&bytes) {
+                if state.disk_cache.mark_in_flight(&cache_key).await {
+                    // Only retry if last attempt was >5min ago (300s)
+                    if state.disk_cache.should_retry_refresh(&cache_key, 300).await {
+                        state.disk_cache.mark_refresh_attempt(&cache_key).await;
+                        let handle = app_handle.clone();
+                        let key = cache_key.clone();
+                        tokio::spawn(async move {
+                            let st = handle.state::<AppState>();
+                            let result = {
+                                let mut client = st.tidal_client.lock().await;
+                                client.get_artist_bio(artist_id).await
+                            };
+                            if let Ok(fresh) = result {
+                                if let Ok(json) = serde_json::to_vec(&fresh) {
+                                    st.disk_cache
+                                        .put(&key, &json, CacheTier::Dynamic, &["artist-bio", &format!("artist:{}", artist_id)])
+                                        .await
+                                        .ok();
+                                }
+                            }
+                            st.disk_cache.clear_in_flight(&key).await;
+                        });
+                    } else {
+                        state.disk_cache.clear_in_flight(&cache_key).await;
+                    }
+                }
+                return Ok(bio);
+            }
+        }
+        CacheResult::Miss => {}
+    }
+
     let mut client = state.tidal_client.lock().await;
-    client.get_artist_bio(artist_id).await
+    let bio = client.get_artist_bio(artist_id).await?;
+    drop(client);
+
+    if let Ok(json) = serde_json::to_vec(&bio) {
+        state.disk_cache
+            .put(&cache_key, &json, CacheTier::Dynamic, &["artist-bio", &format!("artist:{}", artist_id)])
+            .await
+            .ok();
+    }
+    Ok(bio)
 }
 
 /// Debug command: returns the raw JSON structure of multiple page endpoints
-/// so we can see what format Tidal is using and what sections are available.
 #[tauri::command]
 pub async fn debug_home_page_raw(state: State<'_, AppState>) -> Result<String, SoneError> {
     let access_token = {

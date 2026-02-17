@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useRef, startTransition } from "react";
-import { useSetAtom, useStore } from "jotai";
+import { useSetAtom, useStore, useAtomValue } from "jotai";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -35,13 +35,24 @@ import { drawerOpenAtom } from "../atoms/ui";
 // Stable action callbacks (no atom subscriptions)
 import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useFavorites } from "../hooks/useFavorites";
-import { clearCache, savePlaybackQueue, loadPlaybackQueue } from "../api/tidal";
+import {
+  clearCache,
+  savePlaybackQueue,
+  loadPlaybackQueue,
+  getHomePage,
+  getFavoriteTracks,
+  getFavoriteArtists,
+  getFavoriteAlbums,
+} from "../api/tidal";
 
 import type { AuthTokens, Playlist, Track, PlaybackSnapshot } from "../types";
 
 const PLAYBACK_STATE_KEY = "tide-vibe.playback-state.v1";
 
 export function AppInitializer() {
+  // Preload subscribes to auth state (single re-render on login)
+  const isAuthenticated = useAtomValue(isAuthenticatedAtom);
+
   // ---- Auth atom setters (useSetAtom = write-only, no subscribe) ----
   const setIsAuthenticated = useSetAtom(isAuthenticatedAtom);
   const setAuthTokens = useSetAtom(authTokensAtom);
@@ -175,6 +186,31 @@ export function AppInitializer() {
     loadAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ================================================================
+  //  PRELOAD frequently accessed data after auth
+  // ================================================================
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const userId = store.get(authTokensAtom)?.user_id;
+    if (!userId) return;
+
+    // Non-blocking background preload (2s delay to avoid startup congestion)
+    const timer = setTimeout(() => {
+      // Preload in parallel (errors are non-fatal)
+      Promise.all([
+        getHomePage().catch(() => {}),
+        getFavoriteTracks(userId, 0, 50).catch(() => {}),
+        getFavoriteArtists(userId, 20).catch(() => {}),
+        getFavoriteAlbums(userId, 20).catch(() => {}),
+      ]).then(() => {
+        console.log("[Preload] Cache warmed");
+      });
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [isAuthenticated]);
 
   // ================================================================
   //  PLAYBACK RESTORE from backend disk cache → localStorage fallback

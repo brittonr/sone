@@ -109,11 +109,11 @@ pub fn is_track_finished(state: State<'_, AppState>) -> Result<bool, SoneError> 
 
 #[tauri::command(rename_all = "camelCase")]
 pub fn save_playback_queue(state: State<'_, AppState>, snapshot_json: String) -> Result<(), SoneError> {
-    state.write_cache_file("queue.json", &snapshot_json)?;
+    state.write_state_file("queue.json", &snapshot_json)?;
     Ok(())
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub fn load_playback_queue(state: State<'_, AppState>) -> Result<Option<String>, SoneError> {
-    Ok(state.read_cache_file("queue.json"))
+    Ok(state.read_state_file("queue.json"))
 }
