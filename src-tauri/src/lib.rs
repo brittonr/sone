@@ -327,6 +327,7 @@ pub fn run() {
             commands::library::is_track_favorited,
             commands::library::add_favorite_track,
             commands::library::remove_favorite_track,
+            commands::library::get_favorite_album_ids,
             commands::library::is_album_favorited,
             commands::library::add_favorite_album,
             commands::library::remove_favorite_album,

@@ -2,6 +2,7 @@ import { useRef, useState, useCallback } from "react";
 import { Play, ChevronLeft, ChevronRight, Music, MoreHorizontal } from "lucide-react";
 import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useNavigation } from "../hooks/useNavigation";
+import { useFavorites } from "../hooks/useFavorites";
 import {
   type HomeSection as HomeSectionType,
   type MediaItemType,
@@ -32,6 +33,7 @@ export default function HomeSection({ section }: HomeSectionProps) {
     navigateToArtist,
     navigateToMix,
   } = useNavigation();
+  const { favoriteAlbumIds, addFavoriteAlbum, removeFavoriteAlbum } = useFavorites();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(true);
@@ -217,16 +219,28 @@ export default function HomeSection({ section }: HomeSectionProps) {
         onScroll={handleScroll}
         className="flex gap-4 overflow-x-auto no-scrollbar scroll-smooth pb-2"
       >
-        {items.map((item: any) => (
-          <MediaCard
-            key={getItemId(item)}
-            item={item}
-            onClick={() => handleItemClick(item)}
-            onContextMenu={(e) => handleContextMenu(e, item)}
-            isArtist={isArtistItem(item, section.sectionType)}
-            widthClass="w-[180px] flex-shrink-0"
-          />
-        ))}
+        {items.map((item: any) => {
+          const isAlbum = !isArtistItem(item, section.sectionType) && !isMixItem(item, section.sectionType) && !isTrackItem(item, section.sectionType) && !item.uuid && item.id;
+          return (
+            <MediaCard
+              key={getItemId(item)}
+              item={item}
+              onClick={() => handleItemClick(item)}
+              onContextMenu={(e) => handleContextMenu(e, item)}
+              isArtist={isArtistItem(item, section.sectionType)}
+              isFavorited={isAlbum ? favoriteAlbumIds.has(item.id) : undefined}
+              onFavoriteToggle={isAlbum ? (e) => {
+                e.stopPropagation();
+                if (favoriteAlbumIds.has(item.id)) {
+                  removeFavoriteAlbum(item.id);
+                } else {
+                  addFavoriteAlbum(item.id, item);
+                }
+              } : undefined}
+              widthClass="w-[180px] flex-shrink-0"
+            />
+          );
+        })}
       </div>
 
       {/* Media context menu */}

@@ -1199,6 +1199,47 @@ impl TidalClient {
         }))
     }
 
+    pub async fn get_favorite_album_ids(&self, user_id: u64) -> Result<Vec<u64>, SoneError> {
+        let tokens = self.tokens.as_ref().ok_or(SoneError::NotAuthenticated)?;
+        let response = self
+            .client
+            .get(format!("{}/users/{}/favorites/albums", TIDAL_API_URL, user_id))
+            .header("Authorization", format!("Bearer {}", tokens.access_token))
+            .query(&[
+                ("countryCode", self.country_code.as_str()),
+                ("limit", "2000"),
+                ("offset", "0"),
+                ("order", "DATE"),
+                ("orderDirection", "DESC"),
+            ])
+            .send()
+            .await?;
+
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+
+        if !status.is_success() {
+            return Err(SoneError::Api { status: status.as_u16(), body });
+        }
+
+        #[derive(Deserialize)]
+        struct FavAlbumItem {
+            #[serde(default)]
+            item: Option<TidalAlbum>,
+        }
+
+        #[derive(Deserialize)]
+        struct FavAlbumResponse {
+            #[serde(default)]
+            items: Vec<FavAlbumItem>,
+        }
+
+        let data = serde_json::from_str::<FavAlbumResponse>(&body)
+            .map_err(|e| SoneError::Parse(e.to_string()))?;
+
+        Ok(data.items.into_iter().filter_map(|f| f.item.map(|a| a.id)).collect())
+    }
+
     pub async fn add_favorite_album(&self, user_id: u64, album_id: u64) -> Result<(), SoneError> {
         let tokens = self.tokens.as_ref().ok_or(SoneError::NotAuthenticated)?;
         let album_id_str = album_id.to_string();

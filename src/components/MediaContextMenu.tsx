@@ -33,9 +33,9 @@ export default function MediaContextMenu({
     playNextInQueue,
   } = usePlaybackActions();
   const {
+    favoriteAlbumIds,
     addFavoriteAlbum,
     removeFavoriteAlbum,
-    isAlbumFavorited,
     addFavoritePlaylist,
     removeFavoritePlaylist,
   } = useFavorites();
@@ -60,31 +60,17 @@ export default function MediaContextMenu({
   const [isFav, setIsFav] = useState<boolean | null>(null);
   const [checkingFav, setCheckingFav] = useState(false);
 
-  // Check favorite status on mount
+  // Derive favorite status from atoms (no API call needed)
   useEffect(() => {
-    let cancelled = false;
-    const checkFav = async () => {
-      setCheckingFav(true);
-      try {
-        if (item.type === "album") {
-          const result = await isAlbumFavorited(item.id);
-          if (!cancelled) setIsFav(result);
-        } else if (item.type === "playlist") {
-          // Check if this playlist is in the user's favorite playlists
-          const result = favoritePlaylists.some((p) => p.uuid === item.uuid);
-          if (!cancelled) setIsFav(result);
-        } else {
-          // Mixes don't have a favorite API
-          if (!cancelled) setIsFav(null);
-        }
-      } catch {
-        if (!cancelled) setIsFav(null);
-      }
-      if (!cancelled) setCheckingFav(false);
-    };
-    checkFav();
-    return () => { cancelled = true; };
-  }, [item, isAlbumFavorited, favoritePlaylists]);
+    if (item.type === "album") {
+      setIsFav(favoriteAlbumIds.has(item.id));
+    } else if (item.type === "playlist") {
+      setIsFav(favoritePlaylists.some((p) => p.uuid === item.uuid));
+    } else {
+      setIsFav(null);
+    }
+    setCheckingFav(false);
+  }, [item, favoriteAlbumIds, favoritePlaylists]);
 
   // Position the menu at cursor, clamped to viewport
   useEffect(() => {

@@ -21,7 +21,7 @@ import {
   userNameAtom,
 } from "../atoms/auth";
 import { userPlaylistsAtom, favoritePlaylistsAtom } from "../atoms/playlists";
-import { favoriteTrackIdsAtom } from "../atoms/favorites";
+import { favoriteTrackIdsAtom, favoriteAlbumIdsAtom } from "../atoms/favorites";
 import { currentViewAtom } from "../atoms/navigation";
 import {
   isPlayingAtom,
@@ -63,6 +63,7 @@ export function AppInitializer() {
   const setUserPlaylists = useSetAtom(userPlaylistsAtom);
   const setFavoritePlaylists = useSetAtom(favoritePlaylistsAtom);
   const setFavoriteTrackIds = useSetAtom(favoriteTrackIdsAtom);
+  const setFavoriteAlbumIds = useSetAtom(favoriteAlbumIdsAtom);
 
   // ---- Playback atom setters (for restore from localStorage) ----
   const setCurrentTrack = useSetAtom(currentTrackAtom);
@@ -176,15 +177,15 @@ export function AppInitializer() {
           }
         }
 
-        // Favorite track IDs
-        try {
-          const ids = await invoke<number[]>("get_favorite_track_ids", {
-            userId,
-          });
-          setFavoriteTrackIds(new Set(ids));
-        } catch (error) {
-          console.error("Failed to load favorite track IDs:", error);
-        }
+        // Favorite track IDs + album IDs (parallel)
+        Promise.all([
+          invoke<number[]>("get_favorite_track_ids", { userId })
+            .then((ids) => setFavoriteTrackIds(new Set(ids)))
+            .catch((error) => console.error("Failed to load favorite track IDs:", error)),
+          invoke<number[]>("get_favorite_album_ids", { userId })
+            .then((ids) => setFavoriteAlbumIds(new Set(ids)))
+            .catch((error) => console.error("Failed to load favorite album IDs:", error)),
+        ]);
       } catch (err) {
         console.error("Failed to load saved auth:", err);
         setIsAuthChecking(false);

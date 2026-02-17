@@ -162,6 +162,18 @@ export function removeTrackFromFavoritesCache(userId: number, trackId: number): 
   }));
 }
 
+/** Optimistically prepend an album to all cached favorite-album pages. */
+export function addAlbumToFavoritesCache(userId: number, album: AlbumDetail): void {
+  mutateCache<AlbumDetail[]>(`fav-albums:${userId}:`, (albums) => [album, ...albums]);
+}
+
+/** Optimistically remove an album from all cached favorite-album pages. */
+export function removeAlbumFromFavoritesCache(userId: number, albumId: number): void {
+  mutateCache<AlbumDetail[]>(`fav-albums:${userId}:`, (albums) =>
+    albums.filter((a) => a.id !== albumId)
+  );
+}
+
 /** Drop the entire cache (e.g. on logout). */
 export function clearCache(): void {
   store.clear();

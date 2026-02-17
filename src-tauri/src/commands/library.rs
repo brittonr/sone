@@ -367,6 +367,13 @@ pub async fn remove_favorite_track(state: State<'_, AppState>, user_id: u64, tra
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn get_favorite_album_ids(state: State<'_, AppState>, user_id: u64) -> Result<Vec<u64>, SoneError> {
+    log::debug!("[get_favorite_album_ids]: user_id={}", user_id);
+    let client = state.tidal_client.lock().await;
+    client.get_favorite_album_ids(user_id).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn is_album_favorited(state: State<'_, AppState>, user_id: u64, album_id: u64) -> Result<bool, SoneError> {
     log::debug!("[is_album_favorited]: user_id={}, album_id={}", user_id, album_id);
     let client = state.tidal_client.lock().await;

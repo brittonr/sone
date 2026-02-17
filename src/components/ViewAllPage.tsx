@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useNavigation } from "../hooks/useNavigation";
+import { useFavorites } from "../hooks/useFavorites";
 import { getPageSection } from "../api/tidal";
 import { type MediaItemType } from "../types";
 import MediaContextMenu from "./MediaContextMenu";
@@ -25,6 +26,7 @@ export default function ViewAllPage({
 }: ViewAllPageProps) {
   const { playTrack, setQueueTracks } = usePlaybackActions();
   const { navigateToAlbum, navigateToPlaylist } = useNavigation();
+  const { favoriteAlbumIds, addFavoriteAlbum, removeFavoriteAlbum } = useFavorites();
 
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -136,16 +138,28 @@ export default function ViewAllPage({
 
         {!loading && !error && items.length > 0 && (
           <MediaGrid>
-            {items.map((item: any) => (
-              <MediaCard
-                key={getItemId(item)}
-                item={item}
-                onClick={() => handleItemClick(item)}
-                onContextMenu={(e) => handleContextMenu(e, item)}
-                isArtist={isArtistItem(item) || hasArtists}
-                showPlayButton={!hasArtists}
-              />
-            ))}
+            {items.map((item: any) => {
+              const isAlbum = !isArtistItem(item) && !isTrackItem(item) && !item.uuid && item.id;
+              return (
+                <MediaCard
+                  key={getItemId(item)}
+                  item={item}
+                  onClick={() => handleItemClick(item)}
+                  onContextMenu={(e) => handleContextMenu(e, item)}
+                  isArtist={isArtistItem(item) || hasArtists}
+                  showPlayButton={!hasArtists}
+                  isFavorited={isAlbum ? favoriteAlbumIds.has(item.id) : undefined}
+                  onFavoriteToggle={isAlbum ? (e) => {
+                    e.stopPropagation();
+                    if (favoriteAlbumIds.has(item.id)) {
+                      removeFavoriteAlbum(item.id);
+                    } else {
+                      addFavoriteAlbum(item.id, item);
+                    }
+                  } : undefined}
+                />
+              );
+            })}
           </MediaGrid>
         )}
 

@@ -45,15 +45,13 @@ export default function AlbumView({
   const currentTrack = useAtomValue(currentTrackAtom);
   const { playTrack, setQueueTracks, pauseTrack, resumeTrack } =
     usePlaybackActions();
-  const { isAlbumFavorited, addFavoriteAlbum, removeFavoriteAlbum } =
+  const { favoriteAlbumIds, addFavoriteAlbum, removeFavoriteAlbum } =
     useFavorites();
 
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [totalTracks, setTotalTracks] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [favoriteLoading, setFavoriteLoading] = useState(true);
-  const [albumFavorited, setAlbumFavorited] = useState(false);
   const [favoritePending, setFavoritePending] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +59,7 @@ export default function AlbumView({
   const offsetRef = useRef(0);
   const hasMoreRef = useRef(true);
 
+  const albumFavorited = favoriteAlbumIds.has(albumId);
   const hasMore = tracks.length < totalTracks;
 
   // Load album detail + first page of tracks
@@ -69,26 +68,20 @@ export default function AlbumView({
 
     const loadAlbum = async () => {
       setLoading(true);
-      setFavoriteLoading(true);
       setError(null);
       setTracks([]);
       offsetRef.current = 0;
       hasMoreRef.current = true;
 
       try {
-        const [detail, firstPage, favorited] = await Promise.all([
+        const [detail, firstPage] = await Promise.all([
           getAlbumDetail(albumId),
           getAlbumTracks(albumId, 0, PAGE_SIZE),
-          isAlbumFavorited(albumId).catch((favoriteErr) => {
-            console.error("Failed to fetch album favorite state:", favoriteErr);
-            return false;
-          }),
         ]);
 
         if (cancelled) return;
 
         setAlbum(detail);
-        setAlbumFavorited(favorited);
         setTracks(firstPage.items);
         setTotalTracks(firstPage.totalNumberOfItems);
         offsetRef.current = firstPage.items.length;
@@ -102,7 +95,6 @@ export default function AlbumView({
       } finally {
         if (!cancelled) {
           setLoading(false);
-          setFavoriteLoading(false);
         }
       }
     };
@@ -111,7 +103,7 @@ export default function AlbumView({
     return () => {
       cancelled = true;
     };
-  }, [albumId, isAlbumFavorited]);
+  }, [albumId]);
 
   // Load more tracks (infinite scroll)
   const loadMore = useCallback(async () => {
@@ -181,18 +173,15 @@ export default function AlbumView({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   const handleToggleFavorite = async () => {
-    if (favoriteLoading || favoritePending) return;
+    if (favoritePending) return;
 
-    const nextFavoriteState = !albumFavorited;
     setFavoritePending(true);
-
     try {
-      if (nextFavoriteState) {
-        await addFavoriteAlbum(albumId);
-      } else {
+      if (albumFavorited) {
         await removeFavoriteAlbum(albumId);
+      } else {
+        await addFavoriteAlbum(albumId, album ?? undefined);
       }
-      setAlbumFavorited(nextFavoriteState);
     } catch (err) {
       console.error("Failed to toggle album favorite:", err);
     } finally {
@@ -311,7 +300,7 @@ export default function AlbumView({
         <div className="flex items-center gap-2 relative">
           <button
             onClick={handleToggleFavorite}
-            disabled={favoriteLoading || favoritePending}
+            disabled={favoritePending}
             className={`w-10 h-10 rounded-full flex items-center justify-center transition-[color,filter] duration-150 ${
               albumFavorited
                 ? "text-th-accent hover:brightness-110"
@@ -320,7 +309,7 @@ export default function AlbumView({
             title={albumFavorited ? "Remove from favorites" : "Add to favorites"}
             aria-label={albumFavorited ? "Unfavorite album" : "Favorite album"}
           >
-            {favoriteLoading || favoritePending ? (
+            {favoritePending ? (
               <Loader2 size={18} className="animate-spin" />
             ) : (
               <Heart
