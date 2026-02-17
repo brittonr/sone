@@ -32,6 +32,10 @@ pub enum SoneError {
     /// GStreamer / audio pipeline error.
     #[error("Audio error: {0}")]
     Audio(String),
+
+    /// Encryption / decryption failure.
+    #[error("Crypto error: {0}")]
+    Crypto(String),
 }
 
 impl From<std::io::Error> for SoneError {

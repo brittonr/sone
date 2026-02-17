@@ -2,10 +2,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
+use crate::crypto::Crypto;
 use crate::now_secs;
 
 // ---------------------------------------------------------------------------
@@ -185,16 +187,38 @@ impl DiskCacheInner {
 
 const MAX_DISK_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GB
 const EVICT_TARGET: u64 = MAX_DISK_BYTES * 9 / 10; // 1.8 GB
-const CURRENT_SCHEMA_VERSION: u8 = 1;
+const CURRENT_SCHEMA_VERSION: u8 = 2;
 
 pub struct DiskCache {
     base_dir: PathBuf,
     inner: RwLock<DiskCacheInner>,
+    crypto: Arc<Crypto>,
 }
 
 impl DiskCache {
     /// Create cache and rebuild the in-memory index by scanning disk.
-    pub fn new(base_dir: PathBuf) -> Self {
+    /// The actual storage lives under `cache_dir/v{CURRENT_SCHEMA_VERSION}/`.
+    pub fn new(cache_dir: &Path, crypto: Arc<Crypto>) -> Self {
+        let base_dir = cache_dir.join(format!("v{CURRENT_SCHEMA_VERSION}"));
+
+        // Delete old version folders.
+        if let Ok(entries) = fs::read_dir(cache_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let name = match path.file_name().and_then(|n| n.to_str()) {
+                    Some(n) => n.to_string(),
+                    None => continue,
+                };
+                if name.starts_with('v') && name != format!("v{CURRENT_SCHEMA_VERSION}") {
+                    log::info!("[DiskCache] removing old cache folder: {name}");
+                    fs::remove_dir_all(&path).ok();
+                }
+            }
+        }
+
         // Ensure tier subdirs exist.
         for tier in &ALL_TIERS {
             fs::create_dir_all(base_dir.join(tier.subdir())).ok();
@@ -293,6 +317,7 @@ impl DiskCache {
         Self {
             base_dir,
             inner: RwLock::new(inner),
+            crypto,
         }
     }
 
@@ -314,10 +339,20 @@ impl DiskCache {
             return CacheResult::Miss;
         }
 
-        // Read data from disk (outside lock).
+        // Read data from disk (outside lock) and decrypt.
         let dat_path = self.base_dir.join(tier.subdir()).join(format!("{}.dat", hash));
         let data = match fs::read(&dat_path) {
-            Ok(d) => d,
+            Ok(raw) => match self.crypto.decrypt(&raw) {
+                Ok(plain) => plain,
+                Err(e) => {
+                    // Decryption failed (key changed?) — treat as miss, remove corrupt entry.
+                    log::warn!("[DiskCache] decrypt failed for {}: {e}", &hash[..12]);
+                    self.remove_files(&hash, tier);
+                    let mut inner = self.inner.write().await;
+                    inner.remove_entry(&hash);
+                    return CacheResult::Miss;
+                }
+            },
             Err(_) => {
                 // File gone but index has it — clean up.
                 let mut inner = self.inner.write().await;
@@ -372,8 +407,12 @@ impl DiskCache {
         let dat_path = dir.join(format!("{}.dat", hash));
         let meta_path = dir.join(format!("{}.meta", hash));
 
-        // Write files.
-        fs::write(&dat_path, data)?;
+        // Encrypt and write data file.
+        let encrypted = self
+            .crypto
+            .encrypt(data)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        fs::write(&dat_path, &encrypted)?;
         let meta = EntryMeta {
             schema_version: CURRENT_SCHEMA_VERSION,
             tags: tag_strings.clone(),

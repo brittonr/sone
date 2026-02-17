@@ -1,6 +1,7 @@
 mod audio;
 pub mod cache;
 mod commands;
+mod crypto;
 mod error;
 #[cfg(target_os = "linux")]
 mod mpris;
@@ -10,10 +11,12 @@ pub use error::SoneError;
 
 use audio::AudioPlayer;
 use cache::DiskCache;
+use crypto::Crypto;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::{Emitter, Manager};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -44,6 +47,7 @@ pub struct AppState {
     pub settings_path: PathBuf,
     pub cache_dir: PathBuf,
     pub disk_cache: DiskCache,
+    pub crypto: Arc<Crypto>,
     pub minimize_to_tray: AtomicBool,
     pub volume_normalization: AtomicBool,
     #[cfg(target_os = "linux")]
@@ -68,12 +72,43 @@ impl AppState {
         let cache_dir = config_dir.join("cache");
         fs::create_dir_all(&cache_dir).ok();
 
-        let disk_cache = DiskCache::new(cache_dir.join("v2"));
+        // Initialize encryption
+        let crypto = match Crypto::new(&config_dir) {
+            Ok(c) => Arc::new(c),
+            Err(e) => {
+                log::error!("Failed to initialize crypto: {e}. Data-at-rest encryption disabled.");
+                panic!("Crypto initialization failed: {e}");
+            }
+        };
 
-        // Load preferences from saved settings
-        let saved = fs::read_to_string(&settings_path)
+        let disk_cache = DiskCache::new(&cache_dir, crypto.clone());
+
+        // Load preferences from saved settings (decrypt if needed)
+        let saved = fs::read(&settings_path)
             .ok()
-            .and_then(|c| serde_json::from_str::<Settings>(&c).ok());
+            .and_then(|data| crypto.decrypt(&data).ok())
+            .and_then(|plain| String::from_utf8(plain).ok())
+            .and_then(|s| serde_json::from_str::<Settings>(&s).ok());
+
+        // Eager migration: if settings exist but aren't encrypted, re-save encrypted
+        if settings_path.exists() {
+            if let Ok(raw) = fs::read(&settings_path) {
+                if !crypto::is_encrypted(&raw) {
+                    if let Some(ref settings) = saved {
+                        if let Ok(json) = serde_json::to_string_pretty(settings) {
+                            if let Ok(encrypted) = crypto.encrypt(json.as_bytes()) {
+                                if let Err(e) = fs::write(&settings_path, encrypted) {
+                                    log::warn!("Failed to migrate settings to encrypted: {e}");
+                                } else {
+                                    log::info!("Migrated settings.json to encrypted format");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let minimize_to_tray = saved.as_ref().map(|s| s.minimize_to_tray).unwrap_or(false);
         let volume_normalization = saved.as_ref().map(|s| s.volume_normalization).unwrap_or(false);
 
@@ -83,6 +118,7 @@ impl AppState {
             settings_path,
             cache_dir,
             disk_cache,
+            crypto,
             minimize_to_tray: AtomicBool::new(minimize_to_tray),
             volume_normalization: AtomicBool::new(volume_normalization),
             #[cfg(target_os = "linux")]
@@ -91,16 +127,16 @@ impl AppState {
     }
 
     pub fn load_settings(&self) -> Option<Settings> {
-        if let Ok(content) = fs::read_to_string(&self.settings_path) {
-            serde_json::from_str(&content).ok()
-        } else {
-            None
-        }
+        let data = fs::read(&self.settings_path).ok()?;
+        let plain = self.crypto.decrypt(&data).ok()?;
+        let text = String::from_utf8(plain).ok()?;
+        serde_json::from_str(&text).ok()
     }
 
     pub fn save_settings(&self, settings: &Settings) -> Result<(), SoneError> {
         let json = serde_json::to_string_pretty(settings)?;
-        fs::write(&self.settings_path, json)?;
+        let encrypted = self.crypto.encrypt(json.as_bytes())?;
+        fs::write(&self.settings_path, encrypted)?;
         Ok(())
     }
 
@@ -108,12 +144,15 @@ impl AppState {
 
     pub fn read_state_file(&self, name: &str) -> Option<String> {
         let path = self.cache_dir.join(name);
-        fs::read_to_string(&path).ok()
+        let data = fs::read(&path).ok()?;
+        let plain = self.crypto.decrypt(&data).ok()?;
+        String::from_utf8(plain).ok()
     }
 
     pub fn write_state_file(&self, name: &str, content: &str) -> Result<(), SoneError> {
         let path = self.cache_dir.join(name);
-        fs::write(&path, content)?;
+        let encrypted = self.crypto.encrypt(content.as_bytes())?;
+        fs::write(&path, encrypted)?;
         Ok(())
     }
 }
