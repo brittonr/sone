@@ -32,6 +32,7 @@ export interface Track {
   audioQuality?: string;
   trackNumber?: number;
   dateAdded?: string;
+  mixes?: { TRACK_MIX?: string; MASTER_TRACK_MIX?: string };
 }
 
 export interface AlbumDetail {

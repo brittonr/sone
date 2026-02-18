@@ -522,3 +522,4 @@ pub async fn debug_home_page_raw(state: State<'_, AppState>) -> Result<String, S
 
     Ok(summary)
 }
+

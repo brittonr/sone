@@ -40,7 +40,8 @@ export default function MixPage({ mixId, mixInfo, onBack }: MixPageProps) {
       } catch (err: any) {
         if (!cancelled) {
           console.error("Failed to load mix:", err);
-          setError(err?.message || String(err));
+          const msg = typeof err === "string" ? err : typeof err?.message === "string" ? err.message : "Failed to load mix";
+          setError(msg);
         }
       } finally {
         if (!cancelled) {
@@ -247,6 +248,12 @@ export default function MixPage({ mixId, mixInfo, onBack }: MixPageProps) {
             <p className="text-th-text-muted text-sm">
               No tracks found in this mix.
             </p>
+            <button
+              onClick={onBack}
+              className="mt-4 px-6 py-2 bg-white text-black rounded-full text-sm font-bold hover:scale-105 transition-transform"
+            >
+              Go back
+            </button>
           </div>
         )}
       </div>

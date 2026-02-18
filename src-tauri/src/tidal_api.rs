@@ -37,6 +37,9 @@ pub struct TidalTrack {
     pub track_number: Option<u32>,
     #[serde(default)]
     pub date_added: Option<String>,
+    /// Present on track detail responses — contains mix IDs like `TRACK_MIX`.
+    #[serde(default)]
+    pub mixes: Option<Value>,
 }
 
 impl TidalTrack {
@@ -1499,13 +1502,46 @@ impl TidalClient {
 
     pub async fn get_track_radio(&mut self, track_id: u64, limit: u32) -> Result<Vec<TidalTrack>, SoneError> {
         let cc = self.country_code.clone();
+
+        // Step 1: Fetch track detail to get mixes.TRACK_MIX
+        if let Ok(detail_body) = self.api_get_body(
+            &format!("/tracks/{}", track_id),
+            &[("countryCode", &cc)],
+        ).await {
+            if let Ok(detail) = serde_json::from_str::<Value>(&detail_body) {
+                if let Some(track_mix_id) = detail
+                    .get("mixes")
+                    .and_then(|m| m.get("TRACK_MIX"))
+                    .and_then(|v| v.as_str())
+                {
+                    // Step 2: Use get_mix_items (pages/mix with legacy fallback)
+                    if let Ok(tracks) = self.get_mix_items(track_mix_id).await {
+                        if !tracks.is_empty() {
+                            return Ok(tracks);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 3: Fall back to legacy /tracks/{id}/radio
+        // 4xx errors mean "no radio available" — return empty vec instead of error.
+        match self.get_track_radio_legacy(track_id, limit).await {
+            Ok(tracks) => Ok(tracks),
+            Err(SoneError::Api { status, .. }) if (400..500).contains(&status) => Ok(vec![]),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Legacy track radio endpoint: `/tracks/{id}/radio`
+    async fn get_track_radio_legacy(&mut self, track_id: u64, limit: u32) -> Result<Vec<TidalTrack>, SoneError> {
+        let cc = self.country_code.clone();
         let limit_str = limit.to_string();
         let body = self.api_get_body(
             &format!("/tracks/{}/radio", track_id),
             &[("countryCode", &cc), ("limit", &limit_str)],
         ).await?;
 
-        // Tidal v1 radio endpoint may return { items: [...] } or a flat array
         #[derive(Deserialize)]
         struct RadioResponse { items: Vec<TidalTrack> }
 
@@ -2003,6 +2039,51 @@ impl TidalClient {
         };
 
         all_sections.sort_by_key(|s| priority_order(&s.title));
+
+        // DEBUG: log mix IDs from MIX_LIST sections and test pages/mix endpoint
+        for section in &all_sections {
+            if section.section_type == "MIX_LIST" {
+                if let Some(items) = section.items.as_array() {
+                    let mix_ids: Vec<String> = items.iter()
+                        .filter_map(|item| {
+                            item.get("mixId").and_then(|m| m.as_str()).map(|s| s.to_string())
+                                .or_else(|| item.get("id").and_then(|i| i.as_str()).map(|s| s.to_string()))
+                        })
+                        .collect();
+                    log::info!("[DEBUG home] section '{}' mix IDs: {:?}", section.title, mix_ids);
+
+                    // Try pages/mix with first mix ID
+                    if let Some(first_id) = mix_ids.first() {
+                        let cc2 = self.country_code.clone();
+                        match self.api_get_body(
+                            "/pages/mix",
+                            &[("mixId", first_id.as_str()), ("countryCode", &cc2), ("deviceType", "BROWSER"), ("locale", "en_US")],
+                        ).await {
+                            Ok(mix_body) => {
+                                let mix_json: Value = serde_json::from_str(&mix_body).unwrap_or_default();
+                                let title = mix_json.get("title").and_then(|t| t.as_str()).unwrap_or("?");
+                                let row_count = mix_json.get("rows").and_then(|r| r.as_array()).map(|a| a.len()).unwrap_or(0);
+                                // Get track count from TRACK_LIST module
+                                let track_count = mix_json.get("rows").and_then(|r| r.as_array())
+                                    .and_then(|rows| rows.iter().find_map(|row| {
+                                        row.get("modules").and_then(|m| m.as_array()).and_then(|mods| {
+                                            mods.iter().find_map(|module| {
+                                                if module.get("type").and_then(|t| t.as_str()) == Some("TRACK_LIST") {
+                                                    module.get("pagedList")
+                                                        .and_then(|pl| pl.get("totalNumberOfItems"))
+                                                        .and_then(|n| n.as_u64())
+                                                } else { None }
+                                            })
+                                        })
+                                    })).unwrap_or(0);
+                                log::info!("[DEBUG pages/mix] mixId={} title='{}' rows={} tracks={}", first_id, title, row_count, track_count);
+                            }
+                            Err(e) => log::warn!("[DEBUG pages/mix] failed for mixId={}: {}", first_id, e),
+                        }
+                    }
+                }
+            }
+        }
 
         log::debug!("[home_page]: total {} unique sections", all_sections.len());
         Ok(HomePageResponse { sections: all_sections })
@@ -2512,9 +2593,53 @@ impl TidalClient {
 
     // ==================== Mix / Radio Items ====================
 
+    /// Parse tracks from a `pages/mix` JSON response body.
+    /// Finds the first `TRACK_LIST` module and extracts `pagedList.items`.
+    fn parse_mix_page_tracks(body: &str) -> Option<Vec<TidalTrack>> {
+        let json: Value = serde_json::from_str(body).ok()?;
+        let rows = json.get("rows")?.as_array()?;
+        for row in rows {
+            let modules = row.get("modules")?.as_array()?;
+            for module in modules {
+                if module.get("type").and_then(|t| t.as_str()) == Some("TRACK_LIST") {
+                    let items = module.get("pagedList")?.get("items")?.as_array()?;
+                    let mut tracks: Vec<TidalTrack> = items
+                        .iter()
+                        .filter_map(|item| serde_json::from_value::<TidalTrack>(item.clone()).ok())
+                        .collect();
+                    for t in &mut tracks {
+                        t.backfill_artist();
+                    }
+                    return Some(tracks);
+                }
+            }
+        }
+        None
+    }
+
     /// Fetch the tracks in a mix (custom mixes, radio stations, etc.)
-    /// Tidal mixes use a string mixId like "00e4f8f7a5bd..."
+    /// Tries `pages/mix` first, falls back to legacy `/mixes/{id}/items`.
     pub async fn get_mix_items(&mut self, mix_id: &str) -> Result<Vec<TidalTrack>, SoneError> {
+        let cc = self.country_code.clone();
+
+        // Primary: pages/mix endpoint (returns richer data, up to 100 tracks)
+        if let Ok(body) = self.api_get_body(
+            "/pages/mix",
+            &[("mixId", mix_id), ("countryCode", &cc), ("deviceType", "BROWSER"), ("locale", "en_US")],
+        ).await {
+            if let Some(tracks) = Self::parse_mix_page_tracks(&body) {
+                if !tracks.is_empty() {
+                    return Ok(tracks);
+                }
+            }
+        }
+
+        // Fallback: legacy /mixes/{id}/items
+        self.get_mix_items_legacy(mix_id).await
+    }
+
+    /// Legacy mix endpoint: `/mixes/{id}/items`
+    async fn get_mix_items_legacy(&mut self, mix_id: &str) -> Result<Vec<TidalTrack>, SoneError> {
         let cc = self.country_code.clone();
         let body = self.api_get_body(
             &format!("/mixes/{}/items", mix_id),
@@ -2524,9 +2649,13 @@ impl TidalClient {
         let json: Value = serde_json::from_str(&body)
             .map_err(|e| SoneError::Parse(e.to_string()))?;
         if let Some(items) = json.get("items").and_then(|i| i.as_array()) {
-            Ok(items.iter()
+            let mut tracks: Vec<TidalTrack> = items.iter()
                 .filter_map(|entry| entry.get("item").and_then(|item| serde_json::from_value::<TidalTrack>(item.clone()).ok()))
-                .collect())
+                .collect();
+            for t in &mut tracks {
+                t.backfill_artist();
+            }
+            Ok(tracks)
         } else {
             Ok(vec![])
         }

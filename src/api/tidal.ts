@@ -396,12 +396,14 @@ export async function getTrackRadio(
   trackId: number,
   limit: number = 20
 ): Promise<Track[]> {
-  try {
-    return await invoke<Track[]>("get_track_radio", { trackId, limit });
-  } catch (error: any) {
-    console.error("Failed to get track radio:", error);
-    throw error;
-  }
+  return cached(`track-radio:${trackId}:${limit}`, ["track-radio"], async () => {
+    try {
+      return await invoke<Track[]>("get_track_radio", { trackId, limit });
+    } catch (error: any) {
+      console.error("Failed to get track radio:", error);
+      throw error;
+    }
+  }, TTL.MEDIUM);
 }
 
 // ==================== Favorites (parameterised by userId) ====================

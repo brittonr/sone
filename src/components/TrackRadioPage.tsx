@@ -44,7 +44,8 @@ export default function TrackRadioPage({
       } catch (err: any) {
         if (!cancelled) {
           console.error("Failed to load track radio:", err);
-          setError(err?.message || String(err));
+          const msg = typeof err === "string" ? err : typeof err?.message === "string" ? err.message : "Failed to load track radio";
+          setError(msg);
         }
       } finally {
         if (!cancelled) {
@@ -204,6 +205,12 @@ export default function TrackRadioPage({
             <p className="text-th-text-muted text-sm">
               We couldn't find similar tracks for this track.
             </p>
+            <button
+              onClick={onBack}
+              className="mt-4 px-6 py-2 bg-white text-black rounded-full text-sm font-bold hover:scale-105 transition-transform"
+            >
+              Go back
+            </button>
           </div>
         )}
       </div>

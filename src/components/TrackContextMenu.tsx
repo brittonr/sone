@@ -245,14 +245,16 @@ export default function TrackContextMenu({
           <span>{isFav ? "Remove from Loved tracks" : "Add to Loved tracks"}</span>
         </button>
 
-        {/* Divider */}
-        <div className="my-1 border-t border-th-inset" />
-
-        {/* Go to track radio */}
-        <button className={menuItemClass} onClick={handleGoToTrackRadio}>
-          <Radio size={18} className="shrink-0 text-th-text-muted" />
-          <span>Go to track radio</span>
-        </button>
+        {/* Go to track radio (hidden if mixes is populated but TRACK_MIX is absent) */}
+        {(!track.mixes || !!track.mixes?.TRACK_MIX) && (
+          <>
+            <div className="my-1 border-t border-th-inset" />
+            <button className={menuItemClass} onClick={handleGoToTrackRadio}>
+              <Radio size={18} className="shrink-0 text-th-text-muted" />
+              <span>Go to track radio</span>
+            </button>
+          </>
+        )}
 
         {/* Remove from playlist (only for user's own playlist) */}
         {canRemoveFromPlaylist && (
