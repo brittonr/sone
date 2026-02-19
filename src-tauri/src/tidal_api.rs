@@ -2993,6 +2993,27 @@ impl TidalClient {
             .map_err(|e| SoneError::Parse(format!("artist top tracks JSON: {}", e)))
     }
 
+    pub async fn get_artist_view_all(&mut self, artist_id: u64, view_all_path: &str) -> Result<Value, SoneError> {
+        let cc = self.country_code.clone();
+        let id_str = artist_id.to_string();
+        // viewAll paths from v2 API are relative like "artist/ARTIST_ALBUMS/view-all?artistId=123"
+        // They need the v2 base URL, and may already contain query params
+        let url = if view_all_path.starts_with("http") {
+            view_all_path.to_string()
+        } else {
+            let path = view_all_path.trim_start_matches('/');
+            format!("{}/{}", TIDAL_API_V2_URL, path)
+        };
+        // The path may already contain ?artistId=... — reqwest .query() appends correctly
+        let body = self.api_get_body(&url, &[
+            ("artistId", &id_str), ("locale", "en_US"), ("countryCode", &cc),
+            ("deviceType", "BROWSER"), ("platform", "WEB"),
+            ("limit", "50"), ("offset", "0"),
+        ]).await?;
+        serde_json::from_str(&body)
+            .map_err(|e| SoneError::Parse(format!("artist view-all JSON: {}", e)))
+    }
+
     pub async fn get_page(&mut self, api_path: &str) -> Result<HomePageResponse, SoneError> {
         let cc = self.country_code.clone();
         // api_get_body handles both full URLs and relative paths

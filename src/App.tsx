@@ -123,6 +123,7 @@ function AppContent() {
             key={currentView.apiPath}
             title={currentView.title}
             apiPath={currentView.apiPath}
+            artistId={currentView.artistId}
             onBack={navigateHome}
           />
         );

@@ -84,6 +84,7 @@ export type AppView =
       type: "viewAll";
       title: string;
       apiPath: string;
+      artistId?: number;
     }
   | {
       type: "artist";

@@ -458,6 +458,14 @@ function parseArtistPageV1(json: any): ArtistPageData {
   return result;
 }
 
+export async function getArtistViewAll(artistId: number, viewAllPath: string): Promise<any[]> {
+  return cached(`artist-view-all:${artistId}:${viewAllPath}`, ["artist"], async () => {
+    const raw = await invoke<any>("get_artist_view_all", { artistId, viewAllPath });
+    const items = raw?.items || [];
+    return items.map((item: any) => item.data || item);
+  }, TTL.MEDIUM);
+}
+
 export async function getArtistTopTracksAll(artistId: number): Promise<any[]> {
   return cached(`artist-top-tracks-all:${artistId}`, ["artist"], async () => {
     const raw = await invoke<any>("get_artist_top_tracks_all", { artistId });

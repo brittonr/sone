@@ -63,7 +63,7 @@ export default function ArtistPage({
     favoritePlaylistUuids, addFavoritePlaylist, removeFavoritePlaylist,
     favoriteMixIds, addFavoriteMix, removeFavoriteMix,
   } = useFavorites();
-  const { navigateToAlbum, navigateToArtist, navigateToArtistTracks, navigateToPlaylist, navigateToMix } = useNavigation();
+  const { navigateToAlbum, navigateToArtist, navigateToArtistTracks, navigateToPlaylist, navigateToMix, navigateToViewAll } = useNavigation();
   const isFollowed = followedArtistIds.has(artistId);
 
   const [pageData, setPageData] = useState<ArtistPageData | null>(null);
@@ -470,6 +470,7 @@ export default function ArtistPage({
               section={section}
               onCardClick={handleCardClick}
               onContextMenu={handleCardContextMenu}
+              onViewAll={section.apiPath ? () => navigateToViewAll(section.title, section.apiPath!, artistId) : undefined}
               favoriteAlbumIds={favoriteAlbumIds}
               addFavoriteAlbum={addFavoriteAlbum}
               removeFavoriteAlbum={removeFavoriteAlbum}
@@ -547,11 +548,21 @@ function TrackSection({
 
   return (
     <div className="px-8 pb-6">
-      {section.title && (
-        <h2 className="text-[22px] font-bold text-white mb-4">
-          {section.title}
-        </h2>
-      )}
+      <div className="flex items-center justify-between mb-4">
+        {section.title && (
+          <h2 className="text-[22px] font-bold text-white tracking-tight">
+            {section.title}
+          </h2>
+        )}
+        {section.apiPath && (
+          <button
+            onClick={onViewAll}
+            className="px-3 py-1.5 text-[13px] font-bold text-th-text-muted hover:text-white transition-colors"
+          >
+            View all
+          </button>
+        )}
+      </div>
       <div className="flex flex-col">
         {displayTracks.map((track, index) => {
           const trackId = track.id;
@@ -646,14 +657,6 @@ function TrackSection({
           );
         })}
       </div>
-      {section.apiPath && (
-        <button
-          onClick={onViewAll}
-          className="mt-3 px-4 py-2 text-[13px] font-bold text-th-text-muted hover:text-white transition-colors"
-        >
-          View all
-        </button>
-      )}
     </div>
   );
 }
@@ -664,6 +667,7 @@ function CardScrollSection({
   section,
   onCardClick,
   onContextMenu,
+  onViewAll,
   favoriteAlbumIds, addFavoriteAlbum, removeFavoriteAlbum,
   favoritePlaylistUuids, addFavoritePlaylist, removeFavoritePlaylist,
   followedArtistIds, followArtist, unfollowArtist,
@@ -672,6 +676,7 @@ function CardScrollSection({
   section: ArtistPageSection;
   onCardClick: (item: any, sectionType: string) => void;
   onContextMenu: (e: React.MouseEvent, item: any, sectionType: string) => void;
+  onViewAll?: () => void;
   favoriteAlbumIds: Set<number>;
   addFavoriteAlbum: (id: number, album: any) => void;
   removeFavoriteAlbum: (id: number) => void;
@@ -740,6 +745,14 @@ function CardScrollSection({
           >
             <ChevronRight size={18} />
           </button>
+          {onViewAll && (
+            <button
+              onClick={onViewAll}
+              className="px-3 py-1.5 text-[13px] font-bold text-th-text-muted hover:text-white transition-colors"
+            >
+              View all
+            </button>
+          )}
         </div>
       </div>
 

@@ -64,8 +64,8 @@ export function useNavigation() {
   );
 
   const navigateToViewAll = useCallback(
-    (title: string, apiPath: string) => {
-      navigate(setCurrentView, { type: "viewAll", title, apiPath });
+    (title: string, apiPath: string, artistId?: number) => {
+      navigate(setCurrentView, { type: "viewAll", title, apiPath, artistId });
     },
     [setCurrentView]
   );

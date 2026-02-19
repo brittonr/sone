@@ -547,6 +547,69 @@ pub async fn get_artist_top_tracks_all(
     Ok(data)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub async fn get_artist_view_all(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    artist_id: u64,
+    view_all_path: String,
+) -> Result<Value, SoneError> {
+    log::debug!("[get_artist_view_all]: artist_id={}, path={}", artist_id, view_all_path);
+
+    let cache_key = format!("artist-view-all:{}:{}", artist_id, view_all_path);
+    match state.disk_cache.get(&cache_key, CacheTier::Dynamic).await {
+        CacheResult::Fresh(bytes) => {
+            if let Ok(data) = serde_json::from_slice(&bytes) {
+                return Ok(data);
+            }
+        }
+        CacheResult::Stale(bytes) => {
+            if let Ok(data) = serde_json::from_slice::<Value>(&bytes) {
+                if state.disk_cache.mark_in_flight(&cache_key).await {
+                    if state.disk_cache.should_retry_refresh(&cache_key, 300).await {
+                        state.disk_cache.mark_refresh_attempt(&cache_key).await;
+                        let handle = app_handle.clone();
+                        let key = cache_key.clone();
+                        let path = view_all_path.clone();
+                        tokio::spawn(async move {
+                            let st = handle.state::<AppState>();
+                            let result = {
+                                let mut client = st.tidal_client.lock().await;
+                                client.get_artist_view_all(artist_id, &path).await
+                            };
+                            if let Ok(fresh) = result {
+                                if let Ok(json) = serde_json::to_vec(&fresh) {
+                                    st.disk_cache
+                                        .put(&key, &json, CacheTier::Dynamic, &["artist", &format!("artist:{}", artist_id)])
+                                        .await
+                                        .ok();
+                                }
+                            }
+                            st.disk_cache.clear_in_flight(&key).await;
+                        });
+                    } else {
+                        state.disk_cache.clear_in_flight(&cache_key).await;
+                    }
+                }
+                return Ok(data);
+            }
+        }
+        CacheResult::Miss => {}
+    }
+
+    let mut client = state.tidal_client.lock().await;
+    let data = client.get_artist_view_all(artist_id, &view_all_path).await?;
+    drop(client);
+
+    if let Ok(json) = serde_json::to_vec(&data) {
+        state.disk_cache
+            .put(&cache_key, &json, CacheTier::Dynamic, &["artist", &format!("artist:{}", artist_id)])
+            .await
+            .ok();
+    }
+    Ok(data)
+}
+
 /// Debug command: returns the raw JSON structure of multiple page endpoints
 #[tauri::command]
 pub async fn debug_home_page_raw(state: State<'_, AppState>) -> Result<String, SoneError> {

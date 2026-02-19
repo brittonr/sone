@@ -356,6 +356,7 @@ pub fn run() {
             commands::pages::get_artist_bio,
             commands::pages::get_artist_page,
             commands::pages::get_artist_top_tracks_all,
+            commands::pages::get_artist_view_all,
             commands::pages::debug_home_page_raw,
             // search
             commands::search::search_tidal,
