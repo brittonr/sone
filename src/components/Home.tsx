@@ -1,64 +1,117 @@
 import { Play, Heart } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { usePlaylists } from "../hooks/usePlaylists";
 import { useNavigation } from "../hooks/useNavigation";
-import { useAuth } from "../hooks/useAuth";
 import {
   getHomePage,
   refreshHomePage,
-  getFavoriteArtists,
+  getHomePageMore,
 } from "../api/tidal";
 import {
-  getTidalImageUrl,
-  type Playlist,
   type HomeSection as HomeSectionType,
-  type ArtistDetail,
   type MediaItemType,
 } from "../types";
-import TidalImage from "./TidalImage";
 import HomeSection from "./HomeSection";
 import MediaContextMenu from "./MediaContextMenu";
+import {
+  getItemImage,
+  getItemTitle,
+  getItemId,
+  isArtistItem,
+  isMixItem,
+} from "../utils/itemHelpers";
 
 // Simple in-memory cache to prevent skeleton flash on navigation
 let cachedHomeData: {
   sections: HomeSectionType[];
-  favoriteArtists: ArtistDetail[];
+  cursor?: string | null;
 } | null = null;
 
 export default function Home() {
-  const { userPlaylists } = usePlaylists();
-  const { navigateToPlaylist, navigateToFavorites } = useNavigation();
-  const { authTokens } = useAuth();
+  const {
+    navigateToPlaylist,
+    navigateToFavorites,
+    navigateToAlbum,
+    navigateToArtist,
+    navigateToMix,
+  } = useNavigation();
 
   const [sections, setSections] = useState<HomeSectionType[]>(cachedHomeData?.sections || []);
-  const [favoriteArtists, setFavoriteArtists] = useState<ArtistDetail[]>(cachedHomeData?.favoriteArtists || []);
   // If we have cached data, don't show loading skeleton
   const [loading, setLoading] = useState(!cachedHomeData);
   const [greeting, setGreeting] = useState("Good evening");
   const hasLoadedRef = useRef(false);
+  const [cursor, setCursor] = useState<string | null>(cachedHomeData?.cursor ?? null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const hasPaginatedRef = useRef(false);
 
-  // Context menu state for quick-access playlist cards
+  // Context menu state for quick-access shortcut cards
   const [contextMenu, setContextMenu] = useState<{
     item: MediaItemType;
     position: { x: number; y: number };
   } | null>(null);
 
-  const handlePlaylistContextMenu = useCallback(
-    (e: React.MouseEvent, playlist: Playlist) => {
+  const handleShortcutContextMenu = useCallback(
+    (e: React.MouseEvent, item: any) => {
       e.preventDefault();
       e.stopPropagation();
-      setContextMenu({
-        item: {
-          type: "playlist",
-          uuid: playlist.uuid,
-          title: playlist.title,
-          image: playlist.image,
-          creatorName: playlist.creator?.name || (playlist.creator?.id === 0 ? "TIDAL" : undefined),
-        },
-        position: { x: e.clientX, y: e.clientY },
-      });
+      let mediaItem: MediaItemType | null = null;
+
+      if (isMixItem(item, "SHORTCUT_LIST")) {
+        const mixId = item.mixId || item.id?.toString();
+        if (mixId) {
+          mediaItem = { type: "mix", mixId, title: getItemTitle(item), image: getItemImage(item) };
+        }
+      } else if (isArtistItem(item, "SHORTCUT_LIST")) {
+        if (item.id) {
+          mediaItem = { type: "artist", id: item.id, name: item.name || getItemTitle(item), picture: item.picture };
+        }
+      } else if (item.uuid) {
+        mediaItem = {
+          type: "playlist", uuid: item.uuid, title: item.title || getItemTitle(item),
+          image: item.squareImage || item.image,
+          creatorName: item.creator?.name || (item.creator?.id === 0 ? "TIDAL" : undefined),
+        };
+      } else if (item.id) {
+        mediaItem = {
+          type: "album", id: item.id, title: item.title || getItemTitle(item),
+          cover: item.cover, artistName: item.artist?.name || item.artists?.[0]?.name,
+        };
+      }
+
+      if (mediaItem) {
+        setContextMenu({ item: mediaItem, position: { x: e.clientX, y: e.clientY } });
+      }
     },
     []
+  );
+
+  const handleShortcutClick = useCallback(
+    (item: any) => {
+      if (isMixItem(item, "SHORTCUT_LIST")) {
+        const mixId = item.mixId || item.id?.toString();
+        if (mixId) {
+          navigateToMix(mixId, { title: getItemTitle(item), image: getItemImage(item) });
+        }
+      } else if (isArtistItem(item, "SHORTCUT_LIST")) {
+        if (item.id) {
+          navigateToArtist(item.id, { name: item.name || getItemTitle(item), picture: item.picture });
+        }
+      } else if (item.uuid) {
+        navigateToPlaylist(item.uuid, {
+          title: item.title, image: item.squareImage || item.image,
+          description: item.description,
+          creatorName: item.creator?.name || (item.creator?.id === 0 ? "TIDAL" : undefined),
+          numberOfTracks: item.numberOfTracks,
+        });
+      } else if (item.id) {
+        navigateToAlbum(item.id, {
+          title: item.title, cover: item.cover,
+          artistName: item.artist?.name || item.artists?.[0]?.name,
+        });
+      }
+    },
+    [navigateToPlaylist, navigateToAlbum, navigateToArtist, navigateToMix]
   );
 
   useEffect(() => {
@@ -82,18 +135,32 @@ export default function Home() {
           "isStale:", result.isStale
         );
         setSections(result.home.sections);
-        
+        setCursor(result.home.cursor ?? null);
+
         // Update in-memory cache
-        if (!cachedHomeData) cachedHomeData = { sections: [], favoriteArtists: [] };
+        if (!cachedHomeData) cachedHomeData = { sections: [] };
         cachedHomeData.sections = result.home.sections;
+        cachedHomeData.cursor = result.home.cursor ?? null;
 
         // If cache is stale, refresh in background
         if (result.isStale) {
           refreshHomePage()
             .then((fresh) => {
-              setSections(fresh.sections);
-              // Update in-memory cache with fresh data
-              if (cachedHomeData) cachedHomeData.sections = fresh.sections;
+              // Don't replace sections if user has already paginated —
+              // that would wipe out cursor-loaded sections
+              if (!hasPaginatedRef.current) {
+                setSections(fresh.sections);
+                setCursor(fresh.cursor ?? null);
+              }
+              // Always update the in-memory cache for next visit
+              if (cachedHomeData) {
+                cachedHomeData.sections = hasPaginatedRef.current
+                  ? cachedHomeData.sections
+                  : fresh.sections;
+                cachedHomeData.cursor = hasPaginatedRef.current
+                  ? cachedHomeData.cursor
+                  : (fresh.cursor ?? null);
+              }
             })
             .catch((err) => {
               console.error("Background refresh failed:", err);
@@ -103,52 +170,61 @@ export default function Home() {
         console.error("Failed to load home page:", err);
       }
 
-      // Load favorite artists separately (not in /pages/home)
-      try {
-        const userId = authTokens?.user_id;
-        if (userId != null) {
-          const artists = await getFavoriteArtists(userId, 20);
-          setFavoriteArtists(artists);
-          
-          // Update in-memory cache
-          if (!cachedHomeData) cachedHomeData = { sections: [], favoriteArtists: [] };
-          cachedHomeData.favoriteArtists = artists;
-        }
-      } catch (err) {
-        console.error("Failed to load favorite artists:", err);
-      }
-
       setLoading(false);
     };
 
     loadHomeData();
-  }, [authTokens?.user_id]);
+  }, []);
 
-  const handleOpenPlaylist = (playlist: Playlist) => {
-    navigateToPlaylist(playlist.uuid, {
-      title: playlist.title,
-      image: playlist.image,
-      description: playlist.description,
-      creatorName: playlist.creator?.name || (playlist.creator?.id === 0 ? "TIDAL" : undefined),
-      numberOfTracks: playlist.numberOfTracks,
-    });
-  };
+  // Infinite scroll: load more sections when sentinel becomes visible
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
 
-  // Build the favorite artists section as a HomeSection
-  const favoriteArtistsSection: HomeSectionType | null =
-    favoriteArtists.length > 0
-      ? {
-          title: "Your favorite artists",
-          sectionType: "ARTIST_LIST",
-          items: favoriteArtists.map((a) => ({
-            id: a.id,
-            name: a.name,
-            picture: a.picture,
-          })),
-          hasMore: false,
-          apiPath: undefined,
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && cursor && !loadingMore) {
+          setLoadingMore(true);
+          hasPaginatedRef.current = true;
+          getHomePageMore(cursor)
+            .then((result) => {
+              setSections((prev) => {
+                const merged = [...prev, ...result.sections];
+                if (cachedHomeData) cachedHomeData.sections = merged;
+                return merged;
+              });
+              const nextCursor = result.cursor ?? null;
+              setCursor(nextCursor);
+              if (cachedHomeData) cachedHomeData.cursor = nextCursor;
+            })
+            .catch((err) => {
+              console.error("Failed to load more home sections:", err);
+            })
+            .finally(() => {
+              setLoadingMore(false);
+            });
         }
-      : null;
+      },
+      { rootMargin: "200px" }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [cursor, loadingMore]);
+
+  // Extract SHORTCUT_LIST section for the quick-access grid, pass the rest to HomeSection
+  const shortcutSection = sections.find((s) => s.sectionType === "SHORTCUT_LIST");
+  const shortcutItems = shortcutSection
+    ? (Array.isArray(shortcutSection.items) ? shortcutSection.items : [])
+        .filter((item: any) => getItemTitle(item) !== "My Tracks")
+    : [];
+  const contentSections = sections.filter((s) => s.sectionType !== "SHORTCUT_LIST");
+
+  if (shortcutSection) {
+    console.log("[Home] SHORTCUT_LIST:", shortcutItems.length, "items", shortcutItems.slice(0, 2));
+  } else {
+    console.log("[Home] No SHORTCUT_LIST section found. Types:", sections.map((s) => s.sectionType));
+  }
 
   if (loading) {
     return (
@@ -182,18 +258,10 @@ export default function Home() {
     );
   }
 
-  // Insert favorite artists section after the first few sections
-  const allSections = [...sections];
-  if (favoriteArtistsSection) {
-    // Try to insert it around position 6-8, or at the end if not enough sections
-    const insertIdx = Math.min(7, allSections.length);
-    allSections.splice(insertIdx, 0, favoriteArtistsSection);
-  }
-
   return (
     <div className="flex-1 bg-gradient-to-b from-th-surface to-th-base min-h-full">
       <div className="px-6 py-8">
-        {/* Quick Access Grid (Hero) */}
+        {/* Quick Access Grid (Hero) — SHORTCUT_LIST from v2 feed */}
         <section className="mb-10">
           <h1 className="text-[32px] font-bold text-white mb-6 tracking-tight">
             {greeting}
@@ -216,27 +284,31 @@ export default function Home() {
                 </span>
               </div>
             </div>
-            {userPlaylists.slice(0, 7).map((playlist) => (
+            {shortcutItems.slice(0, 7).map((item: any) => (
               <div
-                key={playlist.uuid}
-                onClick={() => handleOpenPlaylist(playlist)}
-                onContextMenu={(e) => handlePlaylistContextMenu(e, playlist)}
+                key={getItemId(item)}
+                onClick={() => handleShortcutClick(item)}
+                onContextMenu={(e) => handleShortcutContextMenu(e, item)}
                 className="flex items-center bg-th-inset/40 hover:bg-th-inset rounded-[4px] overflow-hidden cursor-pointer group transition-[background-color,box-shadow] duration-300 h-[56px] shadow-sm hover:shadow-md"
               >
                 <div className="w-[56px] h-[56px] flex-shrink-0 bg-th-surface-hover shadow-lg relative">
-                  <TidalImage
-                    src={getTidalImageUrl(playlist.image, 160)}
-                    alt={playlist.title}
-                    type="playlist"
-                    className="w-full h-full"
-                  />
+                  {getItemImage(item, 160) ? (
+                    <img
+                      src={getItemImage(item, 160)}
+                      alt={getItemTitle(item)}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-th-surface-hover" />
+                  )}
                   <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                     <Play size={18} fill="white" className="text-white ml-0.5" />
                   </div>
                 </div>
                 <div className="flex-1 flex items-center px-3 min-w-0">
                   <span className="font-bold text-[13px] text-white truncate">
-                    {playlist.title}
+                    {getItemTitle(item)}
                   </span>
                 </div>
               </div>
@@ -244,10 +316,33 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Dynamic sections from /pages/home + favorite artists */}
-        {allSections.map((section, idx) => (
+        {/* Dynamic sections from v2 feed */}
+        {contentSections.map((section, idx) => (
           <HomeSection key={`${section.title}-${idx}`} section={section} />
         ))}
+
+        {/* Loading more skeleton */}
+        {loadingMore && (
+          <div>
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="mb-8">
+                <div className="h-7 w-48 bg-th-surface-hover rounded animate-pulse mb-4" />
+                <div className="flex gap-4">
+                  {Array.from({ length: 6 }).map((_, j) => (
+                    <div key={j} className="flex-shrink-0 w-[180px]">
+                      <div className="aspect-square bg-th-surface-hover rounded-md animate-pulse mb-2" />
+                      <div className="h-4 w-32 bg-th-surface-hover rounded animate-pulse mb-1" />
+                      <div className="h-3 w-24 bg-th-surface-hover rounded animate-pulse" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Infinite scroll sentinel */}
+        <div ref={sentinelRef} className="h-1" />
       </div>
 
       {/* Media context menu for quick-access cards */}

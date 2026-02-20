@@ -213,6 +213,7 @@ export interface HomeSection {
 
 export interface HomePageResponse {
   sections: HomeSection[];
+  cursor?: string;
 }
 
 export interface HomePageCached {

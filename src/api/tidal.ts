@@ -273,6 +273,10 @@ export async function refreshHomePage(): Promise<HomePageResponse> {
   return await invoke<HomePageResponse>("refresh_home_page");
 }
 
+export async function getHomePageMore(cursor: string): Promise<HomePageResponse> {
+  return await invoke<HomePageResponse>("get_home_page_more", { cursor });
+}
+
 export async function getPageSection(
   apiPath: string
 ): Promise<HomePageResponse> {

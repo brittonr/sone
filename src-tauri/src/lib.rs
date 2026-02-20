@@ -348,6 +348,7 @@ pub fn run() {
             commands::pages::get_album_tracks,
             commands::pages::get_home_page,
             commands::pages::refresh_home_page,
+            commands::pages::get_home_page_more,
             commands::pages::get_page_section,
             commands::pages::get_mix_items,
             commands::pages::get_artist_detail,

@@ -157,6 +157,27 @@ pub async fn refresh_home_page(state: State<'_, AppState>) -> Result<HomePageRes
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub async fn get_home_page_more(
+    state: State<'_, AppState>,
+    cursor: String,
+) -> Result<HomePageResponse, SoneError> {
+    log::debug!("[get_home_page_more]: cursor={}", &cursor[..cursor.len().min(32)]);
+    let mut client = state.tidal_client.lock().await;
+    let (mut sections, next_cursor) = client.fetch_v2_home_feed(Some(&cursor)).await;
+    drop(client);
+
+    sections.retain(|s| {
+        !s.title.trim().is_empty()
+            && s.section_type != "PAGE_LINKS_CLOUD"
+            && s.section_type != "PAGE_LINKS"
+            && s.section_type != "SHORTCUT_LIST"
+    });
+
+    log::debug!("[get_home_page_more]: got {} sections, next_cursor={:?}", sections.len(), next_cursor.is_some());
+    Ok(HomePageResponse { sections, cursor: next_cursor })
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub async fn get_page_section(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
