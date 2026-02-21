@@ -82,38 +82,40 @@ impl AudioPlayer {
                     AudioCommand::PlayUrl { uri, reply } => {
                         let result = (|| -> Result<(), String> {
                             if let Some(old) = pipeline.take() {
-                                if pipeline_exclusive {
-                                    tearing_down.store(true, Ordering::SeqCst);
+                                tearing_down.store(true, Ordering::SeqCst);
 
-                                    // Fade volume to mask DC offset pop (non-bit-perfect only)
-                                    if let Some(ref vol) = user_volume_el {
-                                        for i in (0..10).rev() {
-                                            vol.set_property("volume", current_volume * (i as f64 / 10.0));
-                                            std::thread::sleep(std::time::Duration::from_millis(10));
-                                        }
-                                        // Let silence propagate through the ALSA ring buffer
-                                        std::thread::sleep(std::time::Duration::from_millis(150));
-                                    }
-
-                                    // EOS drain: flush the ALSA buffer gracefully
-                                    old.send_event(gst::event::Eos::new());
-                                    let start = std::time::Instant::now();
-                                    while !eos.load(Ordering::SeqCst)
-                                        && start.elapsed() < std::time::Duration::from_millis(1000)
-                                    {
+                                // Fade volume to silence before teardown
+                                if let Some(ref vol) = user_volume_el {
+                                    for i in (0..10).rev() {
+                                        vol.set_property("volume", current_volume * (i as f64 / 10.0));
                                         std::thread::sleep(std::time::Duration::from_millis(10));
                                     }
-                                    log::debug!("[audio] teardown: EOS drain took {:?}", start.elapsed());
+                                    if pipeline_exclusive {
+                                        // ALSA ring buffer needs extra time for silence to propagate
+                                        std::thread::sleep(std::time::Duration::from_millis(150));
+                                    }
                                 }
+
+                                // EOS drain: flush buffers gracefully
+                                old.send_event(gst::event::Eos::new());
+                                let drain_timeout = if pipeline_exclusive { 1000 } else { 500 };
+                                let start = std::time::Instant::now();
+                                while !eos.load(Ordering::SeqCst)
+                                    && start.elapsed() < std::time::Duration::from_millis(drain_timeout)
+                                {
+                                    std::thread::sleep(std::time::Duration::from_millis(10));
+                                }
+                                log::debug!("[audio] teardown: EOS drain took {:?}", start.elapsed());
+
                                 old.set_state(gst::State::Null)
                                     .map_err(|e| format!("Failed to stop old pipeline: {e}"))?;
                                 let _ = old.state(gst::ClockTime::from_mseconds(500));
                                 drop(old);
                                 if pipeline_exclusive {
                                     std::thread::sleep(std::time::Duration::from_millis(50));
-                                    tearing_down.store(false, Ordering::SeqCst);
-                                    log::debug!("[audio] teardown: complete, device released");
                                 }
+                                tearing_down.store(false, Ordering::SeqCst);
+                                log::debug!("[audio] teardown: complete");
                             }
                             user_volume_el = None;
                             norm_volume_el = None;
@@ -131,6 +133,11 @@ impl AudioPlayer {
 
                             log::debug!("[audio] building pipeline: exclusive={exclusive} bit_perfect={bit_perfect}");
                             let (u_vol, n_vol) = if bit_perfect {
+                                // Disable dithering and noise shaping so audioconvert
+                                // only does byte-layout conversion (endianness/interleaving)
+                                audioconvert.set_property("dither", 0i32);
+                                audioconvert.set_property_from_str("noise-shaping", "none");
+
                                 let capsfilter = gst::ElementFactory::make("capsfilter")
                                     .build()
                                     .map_err(|e| format!("Failed to create capsfilter: {e}"))?;
@@ -215,6 +222,16 @@ impl AudioPlayer {
                                 (Some(user_vol), Some(norm_vol))
                             };
 
+                            // Grab a weak ref to the capsfilter for bit-perfect cap locking
+                            let capsfilter_weak: Option<gst::glib::WeakRef<gst::Element>> = if bit_perfect {
+                                audioconvert.static_pad("src")
+                                    .and_then(|p| p.peer())
+                                    .and_then(|p| p.parent_element())
+                                    .map(|el| el.downgrade())
+                            } else {
+                                None
+                            };
+
                             // Connect uridecodebin's dynamic pad to audioconvert
                             let convert_weak = audioconvert.downgrade();
                             uridecodebin.connect_pad_added(move |_src, src_pad| {
@@ -233,6 +250,47 @@ impl AudioPlayer {
                                 if let Err(e) = src_pad.link(&sink_pad) {
                                     log::error!("Failed to link uridecodebin pad: {e:?}");
                                 }
+
+                                // Bit-perfect: lock capsfilter to decoded format so
+                                // audioconvert cannot silently convert bit depth
+                                if let Some(ref cf_weak) = capsfilter_weak {
+                                    if let Some(cf) = cf_weak.upgrade() {
+                                        let caps = src_pad.current_caps()
+                                            .or_else(|| {
+                                                let query = src_pad.query_caps(None);
+                                                if query.is_fixed() { Some(query) } else { None }
+                                            });
+                                        if let Some(caps) = caps {
+                                            if let Some(s) = caps.structure(0) {
+                                                if let (Ok(rate), Ok(channels), Ok(format)) = (
+                                                    s.get::<i32>("rate"),
+                                                    s.get::<i32>("channels"),
+                                                    s.get::<&str>("format"),
+                                                ) {
+                                                    let locked = if format.starts_with("S24") {
+                                                        // 24-bit: allow byte-alignment variants
+                                                        // (S24LE packed, S32LE padded, S24_32LE container)
+                                                        // Hard-blocks truncation to S16LE
+                                                        gst::Caps::builder("audio/x-raw")
+                                                            .field("format", gst::List::new(["S24LE", "S32LE", "S24_32LE"]))
+                                                            .field("rate", rate)
+                                                            .field("channels", channels)
+                                                            .build()
+                                                    } else {
+                                                        // Non-24-bit: lock to exact format
+                                                        gst::Caps::builder("audio/x-raw")
+                                                            .field("format", format)
+                                                            .field("rate", rate)
+                                                            .field("channels", channels)
+                                                            .build()
+                                                    };
+                                                    log::info!("[audio] bit-perfect: locking capsfilter to {locked}");
+                                                    cf.set_property("caps", &locked);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             });
 
                             // Start pipeline — staged transition for hardware sinks
@@ -241,7 +299,7 @@ impl AudioPlayer {
                                 // If PipeWire holds the device (EBUSY), we return "device_busy"
                                 // immediately so the frontend can retry with UI feedback.
                                 pipe.set_state(gst::State::Paused)
-                                    .map_err(|_| "device_busy".to_string())?;
+                                    .map_err(|e| format!("Failed to start pipeline: {e:?}"))?;
                                 let (state_result, _, _) = pipe.state(gst::ClockTime::from_seconds(10));
                                 if state_result.is_err() {
                                     // Check bus for EBUSY vs other failures

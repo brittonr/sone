@@ -65,8 +65,6 @@ pub async fn play_tidal_track(state: State<'_, AppState>, track_id: u64, use_tra
         stream_info.url.clone()
     };
 
-    state.audio_player.play_url(&uri).map_err(SoneError::Audio)?;
-
     // Select replay gain + peak based on playback context (album vs mixed queue)
     let (selected_rg, selected_peak) = if use_track_gain {
         (stream_info.track_replay_gain.or(stream_info.album_replay_gain),
@@ -86,7 +84,8 @@ pub async fn play_tidal_track(state: State<'_, AppState>, track_id: u64, use_tra
         Ordering::Relaxed,
     );
 
-    // Apply normalization gain if enabled
+    // Apply normalization gain BEFORE play_url so the pipeline builds with
+    // the correct current_norm_gain — prevents volume spike on track start.
     let norm_gain = if state.volume_normalization.load(Ordering::Relaxed) {
         compute_norm_gain(selected_rg, selected_peak)
     } else {
@@ -94,6 +93,8 @@ pub async fn play_tidal_track(state: State<'_, AppState>, track_id: u64, use_tra
     };
     log::debug!("[play_tidal_track]: normalization gain={:.3} (use_track_gain={}, rg={:?}, peak={:?})", norm_gain, use_track_gain, selected_rg, selected_peak);
     state.audio_player.set_normalization_gain(norm_gain).map_err(SoneError::Audio)?;
+
+    state.audio_player.play_url(&uri).map_err(SoneError::Audio)?;
 
     // Save last played track
     if let Some(mut settings) = state.load_settings() {
