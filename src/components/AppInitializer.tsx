@@ -36,6 +36,9 @@ import {
   historyAtom,
   volumeAtom,
   preMuteVolumeAtom,
+  exclusiveModeAtom,
+  bitPerfectAtom,
+  exclusiveDeviceAtom,
 } from "../atoms/playback";
 import { drawerOpenAtom } from "../atoms/ui";
 
@@ -136,6 +139,11 @@ export function AppInitializer() {
             if (name) setUserName(name);
           })
           .catch(() => {});
+
+        // Exclusive mode settings (non-blocking, backend-authoritative)
+        invoke<boolean>("get_exclusive_mode").then((v) => store.set(exclusiveModeAtom, v)).catch(() => {});
+        invoke<boolean>("get_bit_perfect").then((v) => store.set(bitPerfectAtom, v)).catch(() => {});
+        invoke<string | null>("get_exclusive_device").then((v) => store.set(exclusiveDeviceAtom, v)).catch(() => {});
 
         // Playlists
         try {

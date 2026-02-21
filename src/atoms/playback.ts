@@ -13,3 +13,7 @@ export const autoplayAtom = atomWithStorage("sone.autoplay.v1", false);
 
 /** true = use track replay gain (shuffle/mixed queue), false = use album replay gain (album in order) */
 export const useTrackGainAtom = atom(true);
+
+export const exclusiveModeAtom = atom(false);
+export const bitPerfectAtom = atom(false);
+export const exclusiveDeviceAtom = atom<string | null>(null);
