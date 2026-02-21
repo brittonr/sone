@@ -6,6 +6,20 @@ use crate::AppState;
 use crate::SoneError;
 use crate::tidal_api::StreamInfo;
 
+/// Tidal-correct normalization: 0.8 * min(10^((rg + 4) / 20), 1 / peak)
+pub fn compute_norm_gain(replay_gain: Option<f64>, peak_amplitude: Option<f64>) -> f64 {
+    match replay_gain {
+        Some(rg) => {
+            let pre_amp = 4.0;
+            let linear = 10.0_f64.powf((rg + pre_amp) / 20.0);
+            let peak = peak_amplitude.filter(|&p| p > 0.0).unwrap_or(1.0);
+            let sf = linear.min(1.0 / peak);
+            0.8 * sf
+        }
+        None => 1.0,
+    }
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub async fn play_tidal_track(state: State<'_, AppState>, track_id: u64) -> Result<StreamInfo, SoneError> {
     // Try quality tiers from highest to lowest.
@@ -53,24 +67,23 @@ pub async fn play_tidal_track(state: State<'_, AppState>, track_id: u64) -> Resu
 
     state.audio_player.play_url(&uri).map_err(SoneError::Audio)?;
 
-    // Store replay gain for live toggle
+    // Store replay gain + peak for live toggle
     state.last_album_replay_gain.store(
         stream_info.album_replay_gain.unwrap_or(f64::NAN).to_bits(),
+        Ordering::Relaxed,
+    );
+    state.last_album_peak_amplitude.store(
+        stream_info.album_peak_amplitude.unwrap_or(f64::NAN).to_bits(),
         Ordering::Relaxed,
     );
 
     // Apply normalization gain if enabled
     let norm_gain = if state.volume_normalization.load(Ordering::Relaxed) {
-        if let Some(rg) = stream_info.album_replay_gain {
-            let linear = 10.0_f64.powf(rg / 20.0);
-            linear.min(1.0) // cap at 0dB
-        } else {
-            1.0
-        }
+        compute_norm_gain(stream_info.album_replay_gain, stream_info.album_peak_amplitude)
     } else {
         1.0
     };
-    log::debug!("[play_tidal_track]: normalization gain={:.3} (albumReplayGain={:?})", norm_gain, stream_info.album_replay_gain);
+    log::debug!("[play_tidal_track]: normalization gain={:.3} (albumReplayGain={:?}, albumPeakAmplitude={:?})", norm_gain, stream_info.album_replay_gain, stream_info.album_peak_amplitude);
     state.audio_player.set_normalization_gain(norm_gain).map_err(SoneError::Audio)?;
 
     // Save last played track

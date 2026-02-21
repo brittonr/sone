@@ -21,10 +21,19 @@ pub struct AuthTokens {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct MediaMetadata {
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TidalTrack {
     pub id: u64,
     pub title: String,
     pub duration: u32,
+    #[serde(default)]
+    pub version: Option<String>,
     #[serde(default)]
     pub artist: Option<TidalArtist>,
     /// Some endpoints return `artists` (plural array) instead of / in addition to `artist`.
@@ -37,7 +46,35 @@ pub struct TidalTrack {
     #[serde(default)]
     pub track_number: Option<u32>,
     #[serde(default)]
+    pub volume_number: Option<u32>,
+    #[serde(default)]
     pub date_added: Option<String>,
+    #[serde(default)]
+    pub isrc: Option<String>,
+    #[serde(default)]
+    pub explicit: Option<bool>,
+    #[serde(default)]
+    pub popularity: Option<u32>,
+    #[serde(default)]
+    pub replay_gain: Option<f64>,
+    #[serde(default)]
+    pub peak: Option<f64>,
+    #[serde(default)]
+    pub copyright: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub stream_ready: Option<bool>,
+    #[serde(default)]
+    pub allow_streaming: Option<bool>,
+    #[serde(default)]
+    pub premium_streaming_only: Option<bool>,
+    #[serde(default)]
+    pub stream_start_date: Option<String>,
+    #[serde(default)]
+    pub audio_modes: Option<Vec<String>>,
+    #[serde(default)]
+    pub media_metadata: Option<MediaMetadata>,
     /// Present on track detail responses — contains mix IDs like `TRACK_MIX`.
     #[serde(default)]
     pub mixes: Option<Value>,
@@ -62,7 +99,13 @@ pub struct TidalAlbumDetail {
     pub id: u64,
     pub title: String,
     #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
     pub cover: Option<String>,
+    #[serde(default)]
+    pub vibrant_color: Option<String>,
+    #[serde(default)]
+    pub video_cover: Option<String>,
     #[serde(default)]
     pub artist: Option<TidalArtist>,
     /// v2 API returns "artists" (plural array) instead of "artist" (singular)
@@ -71,9 +114,38 @@ pub struct TidalAlbumDetail {
     #[serde(default)]
     pub number_of_tracks: Option<u32>,
     #[serde(default)]
+    pub number_of_videos: Option<u32>,
+    #[serde(default)]
+    pub number_of_volumes: Option<u32>,
+    #[serde(default)]
     pub duration: Option<u32>,
     #[serde(default)]
     pub release_date: Option<String>,
+    #[serde(default)]
+    pub upc: Option<String>,
+    /// "ALBUM" | "EP" | "SINGLE"
+    #[serde(default, rename = "type")]
+    pub album_type: Option<String>,
+    #[serde(default)]
+    pub copyright: Option<String>,
+    #[serde(default)]
+    pub explicit: Option<bool>,
+    #[serde(default)]
+    pub popularity: Option<u32>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub audio_quality: Option<String>,
+    #[serde(default)]
+    pub stream_ready: Option<bool>,
+    #[serde(default)]
+    pub allow_streaming: Option<bool>,
+    #[serde(default)]
+    pub stream_start_date: Option<String>,
+    #[serde(default)]
+    pub audio_modes: Option<Vec<String>>,
+    #[serde(default)]
+    pub media_metadata: Option<MediaMetadata>,
 }
 
 impl TidalAlbumDetail {
@@ -117,11 +189,17 @@ pub struct PaginatedResponse<T> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TidalArtist {
     pub id: u64,
     pub name: String,
     #[serde(default)]
     pub picture: Option<String>,
+    /// "MAIN" | "FEATURED" — present on embedded artist refs in tracks/albums
+    #[serde(default, rename = "type")]
+    pub artist_type: Option<String>,
+    #[serde(default)]
+    pub handle: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -133,6 +211,10 @@ pub struct TidalAlbum {
     pub cover: Option<String>,
     #[serde(default)]
     pub vibrant_color: Option<String>,
+    #[serde(default)]
+    pub video_cover: Option<String>,
+    #[serde(default)]
+    pub release_date: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -157,7 +239,26 @@ pub struct TidalPlaylistRaw {
     #[serde(default)]
     pub number_of_tracks: Option<u32>,
     #[serde(default)]
+    pub number_of_videos: Option<u32>,
+    #[serde(default)]
     pub creator: Option<TidalPlaylistCreator>,
+    /// "USER" | "EDITORIAL" | "ARTIST"
+    #[serde(default, rename = "type")]
+    pub playlist_type: Option<String>,
+    #[serde(default)]
+    pub duration: Option<u32>,
+    #[serde(default)]
+    pub popularity: Option<u32>,
+    #[serde(default)]
+    pub public_playlist: Option<bool>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub created: Option<String>,
+    #[serde(default)]
+    pub last_updated: Option<String>,
+    #[serde(default)]
+    pub last_item_added_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -169,6 +270,13 @@ pub struct TidalPlaylist {
     pub image: Option<String>,
     pub number_of_tracks: Option<u32>,
     pub creator: Option<TidalPlaylistCreator>,
+    /// "USER" | "EDITORIAL" | "ARTIST"
+    #[serde(default)]
+    pub playlist_type: Option<String>,
+    #[serde(default)]
+    pub duration: Option<u32>,
+    #[serde(default)]
+    pub last_updated: Option<String>,
 }
 
 impl From<TidalPlaylistRaw> for TidalPlaylist {
@@ -181,6 +289,9 @@ impl From<TidalPlaylistRaw> for TidalPlaylist {
             image: raw.square_image.or(raw.image),
             number_of_tracks: raw.number_of_tracks,
             creator: raw.creator,
+            playlist_type: raw.playlist_type,
+            duration: raw.duration,
+            last_updated: raw.last_updated,
         }
     }
 }
@@ -207,6 +318,8 @@ pub struct TidalLyrics {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TidalContributor {
     pub name: String,
+    #[serde(default)]
+    pub id: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -229,12 +342,31 @@ pub struct StreamInfo {
     pub sample_rate: Option<u32>,
     #[serde(default)]
     pub audio_quality: Option<String>,
+    /// "STEREO" | "DOLBY_ATMOS"
+    #[serde(default)]
+    pub audio_mode: Option<String>,
+    /// "FULL" | "PREVIEW"
+    #[serde(default)]
+    pub asset_presentation: Option<String>,
     /// Raw MPD/DASH manifest XML when the stream is DASH.
     /// `None` for BTS (single-URL) streams.
     #[serde(default)]
     pub manifest: Option<String>,
+    /// "application/dash+xml" | "application/vnd.tidal.bts"
+    #[serde(default)]
+    pub manifest_mime_type: Option<String>,
+    #[serde(default)]
+    pub manifest_hash: Option<String>,
+    #[serde(default)]
+    pub track_id: Option<u64>,
     #[serde(default)]
     pub album_replay_gain: Option<f64>,
+    #[serde(default)]
+    pub album_peak_amplitude: Option<f64>,
+    #[serde(default)]
+    pub track_replay_gain: Option<f64>,
+    #[serde(default)]
+    pub track_peak_amplitude: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -413,11 +545,34 @@ pub struct SuggestionsResponse {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct TidalArtistRole {
+    pub category: String,
+    pub category_id: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TidalArtistDetail {
     pub id: u64,
     pub name: String,
     #[serde(default)]
     pub picture: Option<String>,
+    #[serde(default)]
+    pub handle: Option<String>,
+    #[serde(default)]
+    pub user_id: Option<u64>,
+    #[serde(default)]
+    pub popularity: Option<u32>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub spotlighted: Option<bool>,
+    #[serde(default)]
+    pub artist_types: Option<Vec<String>>,
+    #[serde(default)]
+    pub artist_roles: Option<Vec<TidalArtistRole>>,
+    #[serde(default)]
+    pub mixes: Option<Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1733,6 +1888,12 @@ impl TidalClient {
             sample_rate: Option<u32>,
             #[serde(default)]
             album_replay_gain: Option<f64>,
+            #[serde(default)]
+            album_peak_amplitude: Option<f64>,
+            #[serde(default)]
+            track_replay_gain: Option<f64>,
+            #[serde(default)]
+            track_peak_amplitude: Option<f64>,
         }
 
         let data = serde_json::from_str::<PlaybackInfo>(&body)
@@ -1785,9 +1946,17 @@ impl TidalClient {
                 codec,
                 bit_depth: data.bit_depth,
                 sample_rate: data.sample_rate,
-                audio_quality: data.audio_quality,
+                audio_quality: data.audio_quality.clone(),
+                audio_mode: None,
+                asset_presentation: None,
                 manifest: Some(manifest_str),
+                manifest_mime_type: None,
+                manifest_hash: None,
+                track_id: None,
                 album_replay_gain: data.album_replay_gain,
+                album_peak_amplitude: data.album_peak_amplitude,
+                track_replay_gain: data.track_replay_gain,
+                track_peak_amplitude: data.track_peak_amplitude,
             });
         }
         // JSON fallback
@@ -1817,9 +1986,17 @@ impl TidalClient {
             codec,
             bit_depth: data.bit_depth,
             sample_rate: data.sample_rate,
-            audio_quality: data.audio_quality,
-            album_replay_gain: data.album_replay_gain,
+            audio_quality: data.audio_quality.clone(),
+            audio_mode: None,
+            asset_presentation: None,
             manifest: None,
+            manifest_mime_type: None,
+            manifest_hash: None,
+            track_id: None,
+            album_replay_gain: data.album_replay_gain,
+            album_peak_amplitude: data.album_peak_amplitude,
+            track_replay_gain: data.track_replay_gain,
+            track_peak_amplitude: data.track_peak_amplitude,
         })
     }
 

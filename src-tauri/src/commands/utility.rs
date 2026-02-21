@@ -4,6 +4,7 @@ use tauri::State;
 use crate::AppState;
 use crate::SoneError;
 use crate::cache::{CacheResult, CacheTier};
+use super::playback::compute_norm_gain;
 
 #[tauri::command]
 pub fn update_tray_tooltip(app: tauri::AppHandle, text: String) -> Result<String, SoneError> {
@@ -87,11 +88,10 @@ pub fn set_volume_normalization(state: State<'_, AppState>, enabled: bool) -> Re
     // Immediately apply/reset normalization on the current track
     let norm_gain = if enabled {
         let rg = f64::from_bits(state.last_album_replay_gain.load(Ordering::Relaxed));
-        if rg.is_finite() {
-            10.0_f64.powf(rg / 20.0).min(1.0)
-        } else {
-            1.0
-        }
+        let peak = f64::from_bits(state.last_album_peak_amplitude.load(Ordering::Relaxed));
+        let rg_opt = if rg.is_finite() { Some(rg) } else { None };
+        let peak_opt = if peak.is_finite() { Some(peak) } else { None };
+        compute_norm_gain(rg_opt, peak_opt)
     } else {
         1.0
     };
