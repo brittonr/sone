@@ -369,6 +369,140 @@ pub struct StreamInfo {
     pub track_peak_amplitude: Option<f64>,
 }
 
+// ==================== v2 Home Feed MIX types ====================
+// These structs document the v2 MIX shape. Not yet consumed by backend code
+// (home feed items pass through as raw Value), but available for future typed parsing.
+
+#[allow(dead_code)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MixTextInfo {
+    #[serde(default)]
+    pub color: Option<String>,
+    pub text: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MixImage {
+    #[serde(default)]
+    pub size: Option<String>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    pub url: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MixImageRef {
+    #[serde(default)]
+    pub image_uuid: Option<String>,
+    #[serde(default)]
+    pub vibrant_color: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MixArtistRef {
+    #[serde(default)]
+    pub artist_id: Option<u64>,
+    #[serde(default)]
+    pub artist_name: Option<String>,
+    #[serde(default)]
+    pub artist_image: Option<MixImageRef>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MixTrackRef {
+    #[serde(default)]
+    pub track_id: Option<u64>,
+    #[serde(default)]
+    pub track_title: Option<String>,
+    #[serde(default)]
+    pub track_group: Option<String>,
+    #[serde(default)]
+    pub track_image: Option<MixImageRef>,
+}
+
+/// v2 home feed MIX entity — completely unique shape from other Tidal entities.
+/// Returned in home/feed sections with type "MIX".
+#[allow(dead_code)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TidalMix {
+    pub id: String,
+    /// "TRACK_MIX" | "ARTIST_MIX" | "HISTORY_ALLTIME_MIX" | "HISTORY_MONTHLY_MIX" | "HISTORY_YEARLY_MIX"
+    #[serde(default, rename = "type")]
+    pub mix_type: Option<String>,
+    #[serde(default)]
+    pub title_text_info: Option<MixTextInfo>,
+    #[serde(default)]
+    pub subtitle_text_info: Option<MixTextInfo>,
+    #[serde(default)]
+    pub short_subtitle_text_info: Option<MixTextInfo>,
+    #[serde(default)]
+    pub description: Option<MixTextInfo>,
+    #[serde(default)]
+    pub mix_images: Option<Vec<MixImage>>,
+    #[serde(default)]
+    pub detail_mix_images: Option<Vec<MixImage>>,
+    #[serde(default)]
+    pub artist: Option<MixArtistRef>,
+    #[serde(default)]
+    pub track: Option<MixTrackRef>,
+    #[serde(default)]
+    pub content_behavior: Option<String>,
+    #[serde(default)]
+    pub country_code: Option<String>,
+    #[serde(default)]
+    pub is_stable_id: Option<bool>,
+    #[serde(default)]
+    pub sort_type: Option<String>,
+    #[serde(default)]
+    pub updated: Option<u64>,
+    #[serde(default)]
+    pub artifact_id_type: Option<String>,
+}
+
+// ==================== v2 Favorite Mixes types ====================
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FavoriteMixImageUrl {
+    pub url: String,
+}
+
+/// Shape returned by /v2/favorites/mixes — different from the home feed MIX entity.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TidalFavoriteMix {
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub sub_title: Option<String>,
+    #[serde(default)]
+    pub mix_type: Option<String>,
+    #[serde(default)]
+    pub images: Option<FavoriteMixImages>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "UPPERCASE")]
+pub struct FavoriteMixImages {
+    #[serde(default)]
+    pub small: Option<FavoriteMixImageUrl>,
+    #[serde(default)]
+    pub medium: Option<FavoriteMixImageUrl>,
+    #[serde(default)]
+    pub large: Option<FavoriteMixImageUrl>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TidalSearchResults {
@@ -1779,16 +1913,13 @@ impl TidalClient {
     /// Fetch favorite mix IDs from api.tidal.com/v2/favorites/mixes.
     pub async fn get_favorite_mix_ids(&mut self) -> Result<Vec<String>, SoneError> {
         let response = self.get_favorite_mixes(0, 50).await?;
-        let ids: Vec<String> = response.items
-            .iter()
-            .filter_map(|item| item.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
-            .collect();
+        let ids: Vec<String> = response.items.iter().map(|m| m.id.clone()).collect();
         log::debug!("[get_favorite_mix_ids]: found {} mix IDs", ids.len());
         Ok(ids)
     }
 
     /// Fetch full favorite mix objects from api.tidal.com/v2/favorites/mixes.
-    pub async fn get_favorite_mixes(&mut self, offset: u32, limit: u32) -> Result<PaginatedResponse<serde_json::Value>, SoneError> {
+    pub async fn get_favorite_mixes(&mut self, offset: u32, limit: u32) -> Result<PaginatedResponse<TidalFavoriteMix>, SoneError> {
         let url = format!("{}/favorites/mixes", TIDAL_API_V2_URL);
         let cc = self.country_code.clone();
         let limit_str = limit.to_string();
@@ -1803,8 +1934,8 @@ impl TidalClient {
 
         log::debug!("[get_favorite_mixes]: body_preview={}", &body[..body.len().min(500)]);
 
-        // v2 response is a wrapper object { items: [...] }; extract the inner array
-        let items: Vec<serde_json::Value> = if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&body) {
+        // v2 response is a wrapper object { items: [...] }; extract the inner array as raw Values first
+        let raw_items: Vec<serde_json::Value> = if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&body) {
             arr
         } else if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&body) {
             obj.get("items")
@@ -1816,6 +1947,12 @@ impl TidalClient {
             log::warn!("[get_favorite_mixes]: parse failed - body: {}", &body[..body.len().min(500)]);
             Vec::new()
         };
+
+        // Deserialize each item, skipping any that fail to parse
+        let items: Vec<TidalFavoriteMix> = raw_items
+            .into_iter()
+            .filter_map(|v| serde_json::from_value::<TidalFavoriteMix>(v).ok())
+            .collect();
 
         let count = items.len() as u32;
         log::debug!("[get_favorite_mixes]: found {} mixes", count);

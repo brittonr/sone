@@ -571,7 +571,7 @@ pub async fn get_favorite_mixes(
     app_handle: tauri::AppHandle,
     offset: u32,
     limit: u32,
-) -> Result<crate::tidal_api::PaginatedResponse<serde_json::Value>, SoneError> {
+) -> Result<crate::tidal_api::PaginatedResponse<crate::tidal_api::TidalFavoriteMix>, SoneError> {
     log::debug!("[get_favorite_mixes]: offset={}, limit={}", offset, limit);
 
     let cache_key = format!("fav-mixes:{}:{}", offset, limit);
@@ -582,7 +582,7 @@ pub async fn get_favorite_mixes(
             }
         }
         CacheResult::Stale(bytes) => {
-            if let Ok(data) = serde_json::from_slice::<crate::tidal_api::PaginatedResponse<serde_json::Value>>(&bytes) {
+            if let Ok(data) = serde_json::from_slice::<crate::tidal_api::PaginatedResponse<crate::tidal_api::TidalFavoriteMix>>(&bytes) {
                 if state.disk_cache.mark_in_flight(&cache_key).await {
                     if state.disk_cache.should_retry_refresh(&cache_key, 300).await {
                         state.disk_cache.mark_refresh_attempt(&cache_key).await;

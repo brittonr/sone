@@ -4,7 +4,7 @@ export function getTidalImageUrl(
   size: number = 320
 ): string {
   if (!coverUuid) return "";
-  
+
   // If it's already a full URL, return it as is (or resize if supported, but usually these are static)
   if (coverUuid.startsWith("http")) {
     return coverUuid;
@@ -23,26 +23,63 @@ export function getTidalImageUrl(
   return `https://resources.tidal.com/images/${path}/${validSize}x${validSize}.jpg`;
 }
 
+export interface MediaMetadata {
+  tags: string[]; // "LOSSLESS" | "HIRES_LOSSLESS" | "DOLBY_ATMOS"
+}
+
 export interface Track {
   id: number;
   title: string;
-  artist?: { id: number; name: string; picture?: string };
-  album?: { id: number; title: string; cover?: string; vibrantColor?: string };
+  version?: string;
+  artist?: { id: number; name: string; picture?: string; artistType?: string; handle?: string };
+  album?: { id: number; title: string; cover?: string; vibrantColor?: string; videoCover?: string; releaseDate?: string };
   duration: number;
   audioQuality?: string;
   trackNumber?: number;
+  volumeNumber?: number;
   dateAdded?: string;
+  isrc?: string;
+  explicit?: boolean;
+  popularity?: number;
+  replayGain?: number;
+  peak?: number;
+  copyright?: string;
+  url?: string;
+  streamReady?: boolean;
+  allowStreaming?: boolean;
+  premiumStreamingOnly?: boolean;
+  streamStartDate?: string;
+  audioModes?: string[]; // "STEREO" | "DOLBY_ATMOS"
+  mediaMetadata?: MediaMetadata;
   mixes?: { TRACK_MIX?: string; MASTER_TRACK_MIX?: string };
 }
 
 export interface AlbumDetail {
   id: number;
   title: string;
+  version?: string;
   cover?: string;
-  artist?: { id: number; name: string; picture?: string };
+  vibrantColor?: string;
+  videoCover?: string;
+  artist?: { id: number; name: string; picture?: string; artistType?: string; handle?: string };
   numberOfTracks?: number;
+  numberOfVideos?: number;
+  numberOfVolumes?: number;
   duration?: number;
   releaseDate?: string;
+  upc?: string;
+  /** "ALBUM" | "EP" | "SINGLE" */
+  albumType?: string;
+  copyright?: string;
+  explicit?: boolean;
+  popularity?: number;
+  url?: string;
+  audioQuality?: string;
+  streamReady?: boolean;
+  allowStreaming?: boolean;
+  streamStartDate?: string;
+  audioModes?: string[];
+  mediaMetadata?: MediaMetadata;
 }
 
 export interface PaginatedTracks {
@@ -156,6 +193,10 @@ export interface Playlist {
   image?: string;
   numberOfTracks?: number;
   creator?: { id: number; name?: string };
+  /** "USER" | "EDITORIAL" | "ARTIST" */
+  playlistType?: string;
+  duration?: number;
+  lastUpdated?: string;
 }
 
 export interface PkceAuthParams {
@@ -193,7 +234,7 @@ export interface Lyrics {
 
 export interface Credit {
   creditType: string;
-  contributors: { name: string }[];
+  contributors: { name: string; id?: number }[];
 }
 
 export interface StreamInfo {
@@ -202,8 +243,80 @@ export interface StreamInfo {
   bitDepth?: number;
   sampleRate?: number;
   audioQuality?: string;
+  /** "STEREO" | "DOLBY_ATMOS" */
+  audioMode?: string;
+  /** "FULL" | "PREVIEW" */
+  assetPresentation?: string;
+  /** "application/dash+xml" | "application/vnd.tidal.bts" */
+  manifestMimeType?: string;
+  manifestHash?: string;
+  trackId?: number;
   albumReplayGain?: number;
+  albumPeakAmplitude?: number;
+  trackReplayGain?: number;
+  trackPeakAmplitude?: number;
 }
+
+// ==================== v2 Home Feed MIX types ====================
+
+export interface MixTextInfo {
+  color?: string | null;
+  text: string;
+}
+
+export interface MixImage {
+  size?: string;
+  width?: number;
+  height?: number;
+  url: string;
+}
+
+export interface MixImageRef {
+  imageUuid?: string;
+  vibrantColor?: string;
+}
+
+export interface MixArtistRef {
+  artistId?: number;
+  artistName?: string;
+  artistImage?: MixImageRef;
+}
+
+export interface MixTrackRef {
+  trackId?: number;
+  trackTitle?: string;
+  trackGroup?: string;
+  trackImage?: MixImageRef;
+}
+
+/** v2 home feed MIX entity — completely unique shape from other Tidal entities. */
+export interface HomeFeedMix {
+  id: string;
+  /** "TRACK_MIX" | "ARTIST_MIX" | "HISTORY_ALLTIME_MIX" | "HISTORY_MONTHLY_MIX" | "HISTORY_YEARLY_MIX" */
+  type?: string;
+  titleTextInfo?: MixTextInfo;
+  subtitleTextInfo?: MixTextInfo;
+  shortSubtitleTextInfo?: MixTextInfo;
+  description?: MixTextInfo;
+  mixImages?: MixImage[];
+  detailMixImages?: MixImage[];
+  artist?: MixArtistRef;
+  track?: MixTrackRef;
+  contentBehavior?: string;
+  countryCode?: string;
+  isStableId?: boolean;
+  sortType?: string;
+  updated?: number;
+  artifactIdType?: string;
+}
+
+/** Union of all item types that can appear in a v2 home feed section. */
+export type HomeFeedItem =
+  | (Track & { _itemType?: "TRACK" })
+  | (AlbumDetail & { _itemType?: "ALBUM" })
+  | (Playlist & { _itemType?: "PLAYLIST" })
+  | (ArtistDetail & { _itemType?: "ARTIST" })
+  | (HomeFeedMix & { _itemType?: "MIX" });
 
 // ==================== Home Page Types ====================
 
@@ -225,10 +338,23 @@ export interface HomePageCached {
   isStale: boolean;
 }
 
+export interface ArtistRole {
+  category: string;
+  categoryId: number;
+}
+
 export interface ArtistDetail {
   id: number;
   name: string;
   picture?: string;
+  handle?: string;
+  userId?: number;
+  popularity?: number;
+  url?: string;
+  spotlighted?: boolean;
+  artistTypes?: string[];
+  artistRoles?: ArtistRole[];
+  mixes?: Record<string, string>;
 }
 
 /** Parsed from the raw v1 pages/artist response on the frontend */
@@ -237,14 +363,14 @@ export interface ArtistPageData {
   picture?: string;
   bio?: string;
   bioSource?: string;
-  topTracks: any[];
+  topTracks: Track[];
   sections: ArtistPageSection[];
 }
 
 export interface ArtistPageSection {
   title: string;
   type: string;
-  items: any[];
+  items: (Track | AlbumDetail | ArtistDetail | Playlist | HomeFeedMix)[];
   apiPath?: string;
 }
 
@@ -271,4 +397,11 @@ export interface PlaybackSnapshot {
   currentTrack: Track | null;
   queue: Track[];
   history: Track[];
+}
+
+export interface AllFavoriteIds {
+  tracks: number[];
+  albums: number[];
+  artists: number[];
+  playlists: string[];
 }
