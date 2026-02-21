@@ -10,3 +10,6 @@ export const historyAtom = atom<Track[]>([]);
 export const streamInfoAtom = atom<StreamInfo | null>(null);
 export const preMuteVolumeAtom = atom<number>(0);
 export const autoplayAtom = atomWithStorage("sone.autoplay.v1", false);
+
+/** true = use track replay gain (shuffle/mixed queue), false = use album replay gain (album in order) */
+export const useTrackGainAtom = atom(true);

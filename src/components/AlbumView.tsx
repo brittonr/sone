@@ -125,9 +125,9 @@ export default function AlbumView({
 
   const handlePlayTrack = async (track: Track, index: number) => {
     try {
-      // Set remaining tracks as queue
+      // Set remaining tracks as queue (album context = album gain)
       const remaining = tracks.slice(index + 1);
-      setQueueTracks(remaining);
+      setQueueTracks(remaining, { albumMode: true });
       await playTrack(track);
     } catch (err) {
       console.error("Failed to play track:", err);
@@ -148,7 +148,7 @@ export default function AlbumView({
     }
 
     try {
-      setQueueTracks(tracks.slice(1));
+      setQueueTracks(tracks.slice(1), { albumMode: true });
       await playTrack(tracks[0]);
     } catch (err) {
       console.error("Failed to play all:", err);

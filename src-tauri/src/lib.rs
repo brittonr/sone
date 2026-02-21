@@ -50,10 +50,12 @@ pub struct AppState {
     pub crypto: Arc<Crypto>,
     pub minimize_to_tray: AtomicBool,
     pub volume_normalization: AtomicBool,
-    /// Current track's album replay gain (dB) stored as f64 bits. NAN = no data.
-    pub last_album_replay_gain: AtomicU64,
-    /// Current track's album peak amplitude (linear) stored as f64 bits. NAN = no data.
-    pub last_album_peak_amplitude: AtomicU64,
+    /// Current track's selected replay gain (dB) stored as f64 bits. NAN = no data.
+    /// Album or track gain depending on playback context.
+    pub last_replay_gain: AtomicU64,
+    /// Current track's selected peak amplitude (linear) stored as f64 bits. NAN = no data.
+    /// Album or track peak depending on playback context.
+    pub last_peak_amplitude: AtomicU64,
     #[cfg(target_os = "linux")]
     pub mpris: mpris::MprisHandle,
 }
@@ -125,8 +127,8 @@ impl AppState {
             crypto,
             minimize_to_tray: AtomicBool::new(minimize_to_tray),
             volume_normalization: AtomicBool::new(volume_normalization),
-            last_album_replay_gain: AtomicU64::new(f64::NAN.to_bits()),
-            last_album_peak_amplitude: AtomicU64::new(f64::NAN.to_bits()),
+            last_replay_gain: AtomicU64::new(f64::NAN.to_bits()),
+            last_peak_amplitude: AtomicU64::new(f64::NAN.to_bits()),
             #[cfg(target_os = "linux")]
             mpris: mpris::MprisHandle::new(app_handle),
         }

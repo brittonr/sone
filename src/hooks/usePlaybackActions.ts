@@ -19,6 +19,7 @@ import {
   historyAtom,
   streamInfoAtom,
   autoplayAtom,
+  useTrackGainAtom,
 } from "../atoms/playback";
 import { getTrackRadio } from "../api/tidal";
 import type { Track, StreamInfo } from "../types";
@@ -46,6 +47,7 @@ export function usePlaybackActions() {
         const normalized = normalizeTrack(track);
         const info = await invoke<StreamInfo>("play_tidal_track", {
           trackId: normalized.id,
+          useTrackGain: store.get(useTrackGainAtom),
         });
         store.set(streamInfoAtom, info);
         store.set(currentTrackAtom, normalized);
@@ -75,6 +77,7 @@ export function usePlaybackActions() {
       if (isFinished) {
         const info = await invoke<StreamInfo>("play_tidal_track", {
           trackId: track.id,
+          useTrackGain: store.get(useTrackGainAtom),
         });
         store.set(streamInfoAtom, info);
       } else {
@@ -130,7 +133,8 @@ export function usePlaybackActions() {
   );
 
   const setQueueTracks = useCallback(
-    (tracks: Track[]) => {
+    (tracks: Track[], options?: { albumMode?: boolean }) => {
+      store.set(useTrackGainAtom, !options?.albumMode);
       store.set(queueAtom, tracks.map(normalizeTrack));
     },
     [store]
@@ -165,6 +169,7 @@ export function usePlaybackActions() {
           if (fresh.length > 0) {
             const [next, ...rest] = fresh;
             store.set(queueAtom, rest);
+            store.set(useTrackGainAtom, true); // radio = mixed context
             await playTrack(next);
             return;
           }
@@ -203,6 +208,7 @@ export function usePlaybackActions() {
       try {
         const info = await invoke<StreamInfo>("play_tidal_track", {
           trackId: prevTrack.id,
+          useTrackGain: store.get(useTrackGainAtom),
         });
         store.set(streamInfoAtom, info);
         store.set(currentTrackAtom, prevTrack);

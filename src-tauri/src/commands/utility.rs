@@ -87,8 +87,8 @@ pub fn set_volume_normalization(state: State<'_, AppState>, enabled: bool) -> Re
 
     // Immediately apply/reset normalization on the current track
     let norm_gain = if enabled {
-        let rg = f64::from_bits(state.last_album_replay_gain.load(Ordering::Relaxed));
-        let peak = f64::from_bits(state.last_album_peak_amplitude.load(Ordering::Relaxed));
+        let rg = f64::from_bits(state.last_replay_gain.load(Ordering::Relaxed));
+        let peak = f64::from_bits(state.last_peak_amplitude.load(Ordering::Relaxed));
         let rg_opt = if rg.is_finite() { Some(rg) } else { None };
         let peak_opt = if peak.is_finite() { Some(peak) } else { None };
         compute_norm_gain(rg_opt, peak_opt)

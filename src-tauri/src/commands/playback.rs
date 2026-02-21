@@ -21,7 +21,7 @@ pub fn compute_norm_gain(replay_gain: Option<f64>, peak_amplitude: Option<f64>) 
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub async fn play_tidal_track(state: State<'_, AppState>, track_id: u64) -> Result<StreamInfo, SoneError> {
+pub async fn play_tidal_track(state: State<'_, AppState>, track_id: u64, use_track_gain: bool) -> Result<StreamInfo, SoneError> {
     // Try quality tiers from highest to lowest.
     // Without client_secret, skip Hi-Res (those credentials typically return
     // encrypted DASH streams that require Widevine). With a secret, the
@@ -67,23 +67,32 @@ pub async fn play_tidal_track(state: State<'_, AppState>, track_id: u64) -> Resu
 
     state.audio_player.play_url(&uri).map_err(SoneError::Audio)?;
 
-    // Store replay gain + peak for live toggle
-    state.last_album_replay_gain.store(
-        stream_info.album_replay_gain.unwrap_or(f64::NAN).to_bits(),
+    // Select replay gain + peak based on playback context (album vs mixed queue)
+    let (selected_rg, selected_peak) = if use_track_gain {
+        (stream_info.track_replay_gain.or(stream_info.album_replay_gain),
+         stream_info.track_peak_amplitude.or(stream_info.album_peak_amplitude))
+    } else {
+        (stream_info.album_replay_gain.or(stream_info.track_replay_gain),
+         stream_info.album_peak_amplitude.or(stream_info.track_peak_amplitude))
+    };
+
+    // Store selected values for live toggle
+    state.last_replay_gain.store(
+        selected_rg.unwrap_or(f64::NAN).to_bits(),
         Ordering::Relaxed,
     );
-    state.last_album_peak_amplitude.store(
-        stream_info.album_peak_amplitude.unwrap_or(f64::NAN).to_bits(),
+    state.last_peak_amplitude.store(
+        selected_peak.unwrap_or(f64::NAN).to_bits(),
         Ordering::Relaxed,
     );
 
     // Apply normalization gain if enabled
     let norm_gain = if state.volume_normalization.load(Ordering::Relaxed) {
-        compute_norm_gain(stream_info.album_replay_gain, stream_info.album_peak_amplitude)
+        compute_norm_gain(selected_rg, selected_peak)
     } else {
         1.0
     };
-    log::debug!("[play_tidal_track]: normalization gain={:.3} (albumReplayGain={:?}, albumPeakAmplitude={:?})", norm_gain, stream_info.album_replay_gain, stream_info.album_peak_amplitude);
+    log::debug!("[play_tidal_track]: normalization gain={:.3} (use_track_gain={}, rg={:?}, peak={:?})", norm_gain, use_track_gain, selected_rg, selected_peak);
     state.audio_player.set_normalization_gain(norm_gain).map_err(SoneError::Audio)?;
 
     // Save last played track
