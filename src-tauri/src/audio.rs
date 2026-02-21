@@ -69,6 +69,10 @@ impl AudioPlayer {
             let mut exclusive = false;
             let mut bit_perfect = false;
             let mut device: Option<String> = None;
+            // What mode the *running* pipeline was built with (for teardown).
+            // Mode toggles take effect on next PlayUrl, so teardown must use
+            // the old pipeline's mode, not the current toggle state.
+            let mut pipeline_exclusive = false;
 
             let mut current_volume: f64 = 1.0;
             let mut current_norm_gain: f64 = 1.0;
@@ -78,11 +82,7 @@ impl AudioPlayer {
                     AudioCommand::PlayUrl { uri, reply } => {
                         let result = (|| -> Result<(), String> {
                             if let Some(old) = pipeline.take() {
-                                if exclusive || bit_perfect {
-                                    // Pause immediately so user hears silence during teardown
-                                    old.set_state(gst::State::Paused).ok();
-
-                                    log::debug!("[audio] teardown: exclusive={exclusive} bit_perfect={bit_perfect} has_vol={}", user_volume_el.is_some());
+                                if pipeline_exclusive {
                                     tearing_down.store(true, Ordering::SeqCst);
 
                                     // Fade volume to mask DC offset pop (non-bit-perfect only)
@@ -92,13 +92,10 @@ impl AudioPlayer {
                                             std::thread::sleep(std::time::Duration::from_millis(10));
                                         }
                                         // Let silence propagate through the ALSA ring buffer
-                                        // so snd_pcm_close() transitions from near-zero output
                                         std::thread::sleep(std::time::Duration::from_millis(150));
-                                        log::debug!("[audio] teardown: volume faded to 0 + silence fill");
                                     }
 
-                                    // EOS drain: flush the ALSA buffer gracefully instead of
-                                    // cutting the PCM stream mid-sample
+                                    // EOS drain: flush the ALSA buffer gracefully
                                     old.send_event(gst::event::Eos::new());
                                     let start = std::time::Instant::now();
                                     while !eos.load(Ordering::SeqCst)
@@ -106,14 +103,13 @@ impl AudioPlayer {
                                     {
                                         std::thread::sleep(std::time::Duration::from_millis(10));
                                     }
-                                    log::debug!("[audio] teardown: EOS drain took {:?}, eos_flag={}", start.elapsed(), eos.load(Ordering::SeqCst));
+                                    log::debug!("[audio] teardown: EOS drain took {:?}", start.elapsed());
                                 }
                                 old.set_state(gst::State::Null)
                                     .map_err(|e| format!("Failed to stop old pipeline: {e}"))?;
                                 let _ = old.state(gst::ClockTime::from_mseconds(500));
-                                let was_exclusive = exclusive || bit_perfect;
                                 drop(old);
-                                if was_exclusive {
+                                if pipeline_exclusive {
                                     std::thread::sleep(std::time::Duration::from_millis(50));
                                     tearing_down.store(false, Ordering::SeqCst);
                                     log::debug!("[audio] teardown: complete, device released");
@@ -316,6 +312,7 @@ impl AudioPlayer {
                             }
 
                             pipeline = Some(pipe);
+                            pipeline_exclusive = exclusive || bit_perfect;
                             Ok(())
                         })();
                         reply.send(result).ok();
@@ -342,8 +339,7 @@ impl AudioPlayer {
                     AudioCommand::Stop { reply } => {
                         let result = match pipeline.as_ref() {
                             Some(p) => {
-                                if exclusive && !bit_perfect {
-                                    // Fade volume to mask pop on hardware sink
+                                if pipeline_exclusive {
                                     if let Some(ref vol) = user_volume_el {
                                         for i in (0..10).rev() {
                                             vol.set_property("volume", current_volume * (i as f64 / 10.0));
