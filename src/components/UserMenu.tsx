@@ -1,4 +1,4 @@
-import { LogOut, Palette, RefreshCw, User, Keyboard, X, MonitorDown, Volume2, Infinity as InfinityIcon } from "lucide-react";
+import { LogOut, Palette, RefreshCw, User, Keyboard, X, MonitorDown, Volume2, Infinity as InfinityIcon, Headphones, Shield } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useAtom } from "jotai";
@@ -31,6 +31,10 @@ export default function UserMenu() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [minimizeToTray, setMinimizeToTray] = useState(false);
   const [volumeNormalization, setVolumeNormalization] = useState(false);
+  const [exclusiveMode, setExclusiveMode] = useState(false);
+  const [bitPerfect, setBitPerfect] = useState(false);
+  const [exclusiveDevice, setExclusiveDevice] = useState<string | null>(null);
+  const [audioDevices, setAudioDevices] = useState<Array<{ id: string; name: string }>>([]);
   const [autoplay, setAutoplay] = useAtom(autoplayAtom);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -38,6 +42,9 @@ export default function UserMenu() {
   useEffect(() => {
     invoke<boolean>("get_minimize_to_tray").then(setMinimizeToTray).catch(() => {});
     invoke<boolean>("get_volume_normalization").then(setVolumeNormalization).catch(() => {});
+    invoke<boolean>("get_exclusive_mode").then(setExclusiveMode).catch(() => {});
+    invoke<boolean>("get_bit_perfect").then(setBitPerfect).catch(() => {});
+    invoke<string | null>("get_exclusive_device").then(setExclusiveDevice).catch(() => {});
   }, []);
 
   // Toggle shortcuts modal from ? key
@@ -46,6 +53,21 @@ export default function UserMenu() {
     window.addEventListener("toggle-shortcuts", handler);
     return () => window.removeEventListener("toggle-shortcuts", handler);
   }, []);
+
+  // Load audio devices when exclusive mode is enabled
+  useEffect(() => {
+    if (exclusiveMode) {
+      invoke<Array<{ id: string; name: string }>>("list_audio_devices")
+        .then((devices) => {
+          setAudioDevices(devices);
+          if (!exclusiveDevice && devices.length > 0) {
+            setExclusiveDevice(devices[0].id);
+            invoke("set_exclusive_device", { device: devices[0].id }).catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }
+  }, [exclusiveMode]);
 
   // Close on click outside
   useEffect(() => {
@@ -125,11 +147,16 @@ export default function UserMenu() {
           {/* Volume normalization */}
           <button
             onClick={() => {
+              if (bitPerfect) return;
               const next = !volumeNormalization;
               setVolumeNormalization(next);
               invoke("set_volume_normalization", { enabled: next }).catch(() => {});
             }}
-            className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-th-text-secondary hover:text-white hover:bg-th-border-subtle transition-colors"
+            className={`w-full flex items-center gap-3 px-4 py-2.5 text-[13px] transition-colors ${
+              bitPerfect
+                ? "text-th-text-muted cursor-not-allowed opacity-50"
+                : "text-th-text-secondary hover:text-white hover:bg-th-border-subtle"
+            }`}
           >
             <Volume2 size={16} />
             <span className="flex-1 text-left">Normalize volume</span>
@@ -145,6 +172,80 @@ export default function UserMenu() {
               />
             </div>
           </button>
+
+          {/* Exclusive output */}
+          <button
+            onClick={() => {
+              const next = !exclusiveMode;
+              setExclusiveMode(next);
+              if (!next) {
+                setBitPerfect(false);
+              }
+              invoke("set_exclusive_mode", { enabled: next }).catch(() => {});
+            }}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-th-text-secondary hover:text-white hover:bg-th-border-subtle transition-colors"
+          >
+            <Headphones size={16} />
+            <span className="flex-1 text-left">Exclusive output</span>
+            <div
+              className={`w-8 h-[18px] rounded-full transition-colors ${
+                exclusiveMode ? "bg-th-accent" : "bg-th-border-subtle"
+              }`}
+            >
+              <div
+                className={`w-3.5 h-3.5 rounded-full bg-white mt-[2px] transition-transform ${
+                  exclusiveMode ? "translate-x-[16px]" : "translate-x-[2px]"
+                }`}
+              />
+            </div>
+          </button>
+
+          {/* Device selector (visible when exclusive on) */}
+          {exclusiveMode && audioDevices.length > 0 && (
+            <div className="px-4 py-2 flex items-center gap-3">
+              <div className="w-4" />
+              <select
+                value={exclusiveDevice || ""}
+                onChange={(e) => {
+                  setExclusiveDevice(e.target.value);
+                  invoke("set_exclusive_device", { device: e.target.value }).catch(() => {});
+                }}
+                className="flex-1 bg-th-inset text-[12px] text-th-text-secondary rounded-md px-2 py-1.5 border border-th-border-subtle outline-none focus:border-th-accent"
+              >
+                {audioDevices.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} ({d.id})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Bit-perfect mode (visible when exclusive on) */}
+          {exclusiveMode && (
+            <button
+              onClick={() => {
+                const next = !bitPerfect;
+                setBitPerfect(next);
+                invoke("set_bit_perfect", { enabled: next }).catch(() => {});
+              }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-th-text-secondary hover:text-white hover:bg-th-border-subtle transition-colors"
+            >
+              <Shield size={16} />
+              <span className="flex-1 text-left">Bit-perfect</span>
+              <div
+                className={`w-8 h-[18px] rounded-full transition-colors ${
+                  bitPerfect ? "bg-th-accent" : "bg-th-border-subtle"
+                }`}
+              >
+                <div
+                  className={`w-3.5 h-3.5 rounded-full bg-white mt-[2px] transition-transform ${
+                    bitPerfect ? "translate-x-[16px]" : "translate-x-[2px]"
+                  }`}
+                />
+              </div>
+            </button>
+          )}
 
           {/* Autoplay */}
           <button
