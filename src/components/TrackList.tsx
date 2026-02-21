@@ -62,6 +62,8 @@ interface TrackRowProps {
   showDateAdded: boolean;
   context: string;
   onPlay: (track: Track, index: number) => void;
+  currentTrackId: number | null;
+  isCurrentlyPlaying: boolean;
   playlistId?: string;
   isUserPlaylist?: boolean;
   onTrackRemoved?: (index: number) => void;
@@ -78,12 +80,12 @@ const TrackRow = memo(function TrackRow({
   showDateAdded,
   context,
   onPlay,
+  currentTrackId,
+  isCurrentlyPlaying,
   playlistId,
   isUserPlaylist,
   onTrackRemoved,
 }: TrackRowProps) {
-  const currentTrack = useAtomValue(currentTrackAtom);
-  const isPlaying = useAtomValue(isPlayingAtom);
   const favoriteTrackIds = useAtomValue(favoriteTrackIdsAtom);
   const { navigateToAlbum, navigateToArtist } = useNavigation();
   const { addFavoriteTrack, removeFavoriteTrack } = useFavorites();
@@ -94,8 +96,8 @@ const TrackRow = memo(function TrackRow({
   const plusButtonRef = useRef<HTMLButtonElement>(null);
   const dotsButtonRef = useRef<HTMLButtonElement>(null);
 
-  const isActive = currentTrack?.id === track.id;
-  const playing = isActive && isPlaying;
+  const isActive = currentTrackId === track.id;
+  const playing = isActive && isCurrentlyPlaying;
   const isFav = favoriteTrackIds.has(track.id);
 
   const toggleFavorite = async (e: React.MouseEvent) => {
@@ -319,7 +321,7 @@ const TrackRow = memo(function TrackRow({
 
 // ─── TrackList ─────────────────────────────────────────────────────────────
 
-export default function TrackList({
+export default memo(function TrackList({
   tracks,
   onPlay,
   showDateAdded = false,
@@ -335,6 +337,9 @@ export default function TrackList({
   isUserPlaylist,
   onTrackRemoved,
 }: TrackListProps) {
+  const currentTrack = useAtomValue(currentTrackAtom);
+  const isPlaying = useAtomValue(isPlayingAtom);
+  const currentTrackId = currentTrack?.id ?? null;
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
 
@@ -403,6 +408,8 @@ export default function TrackList({
             showDateAdded={showDateAdded}
             context={context}
             onPlay={onPlay}
+            currentTrackId={currentTrackId}
+            isCurrentlyPlaying={isPlaying}
             playlistId={playlistId}
             isUserPlaylist={isUserPlaylist}
             onTrackRemoved={onTrackRemoved}
@@ -462,4 +469,4 @@ export default function TrackList({
       )}
     </div>
   );
-}
+});

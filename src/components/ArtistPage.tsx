@@ -1,6 +1,6 @@
 import { Play, Pause, User, X, Shuffle, UserPlus, UserCheck, ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
-import { useAtomValue } from "jotai";
+import { useStore } from "jotai";
 import { isPlayingAtom, currentTrackAtom } from "../atoms/playback";
 import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useFavorites } from "../hooks/useFavorites";
@@ -52,8 +52,7 @@ export default function ArtistPage({
   artistInfo,
   onBack,
 }: ArtistPageProps) {
-  const isPlaying = useAtomValue(isPlayingAtom);
-  const currentTrack = useAtomValue(currentTrackAtom);
+  const store = useStore();
   const { playTrack, setQueueTracks, pauseTrack, resumeTrack } =
     usePlaybackActions();
   const { followedArtistIds, followArtist, unfollowArtist,
@@ -133,6 +132,8 @@ export default function ArtistPage({
   const handlePlayAll = async () => {
     if (topTracks.length === 0) return;
 
+    const currentTrack = store.get(currentTrackAtom);
+    const isPlaying = store.get(isPlayingAtom);
     if (currentTrack && trackIds.has(currentTrack.id)) {
       if (isPlaying) {
         await pauseTrack();
@@ -261,11 +262,10 @@ export default function ArtistPage({
     [navigateToAlbum, navigateToArtist, navigateToPlaylist, navigateToMix]
   );
 
-  const artistPlaying = !!(
-    currentTrack &&
-    trackIds.has(currentTrack.id) &&
-    isPlaying
-  );
+  const artistPlaying = (() => {
+    const ct = store.get(currentTrackAtom);
+    return !!(ct && trackIds.has(ct.id) && store.get(isPlayingAtom));
+  })();
 
   if (loading) {
     return <ArtistPageSkeleton />;

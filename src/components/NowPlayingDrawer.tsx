@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback, memo, useMemo } from "react";
 import { useAtomValue } from "jotai";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   isPlayingAtom,
   currentTrackAtom,
@@ -46,7 +47,9 @@ const TABS: { id: TabId; label: string; icon: typeof ListMusic }[] = [
 
 // ─── Queue Tab ───────────────────────────────────────────────────────────────
 
-const QueueTab = memo(function QueueTab() {
+const QUEUE_ROW_HEIGHT = 56; // px — matches py-2 (8+8) + h-10 (40) content
+
+const QueueTab = memo(function QueueTab({ scrollEl }: { scrollEl: HTMLDivElement }) {
   const currentTrack = useAtomValue(currentTrackAtom);
   const queue = useAtomValue(queueAtom);
   const history = useAtomValue(historyAtom);
@@ -174,6 +177,13 @@ const QueueTab = memo(function QueueTab() {
     ]
   );
 
+  const virtualizer = useVirtualizer({
+    count: queue.length,
+    getScrollElement: () => scrollEl,
+    estimateSize: () => QUEUE_ROW_HEIGHT,
+    overscan: 10,
+  });
+
   return (
     <div className="flex flex-col gap-6">
       {/* History — chronological order, most recent at the bottom */}
@@ -214,7 +224,7 @@ const QueueTab = memo(function QueueTab() {
         </section>
       )}
 
-      {/* Next Up — draggable */}
+      {/* Next Up — virtualized, draggable */}
       {queue.length > 0 && (
         <section>
           <div className="flex items-center justify-between mb-3">
@@ -228,8 +238,10 @@ const QueueTab = memo(function QueueTab() {
               Clear
             </button>
           </div>
-          <div className="flex flex-col">
-            {queue.map((track, i) => {
+          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+            {virtualizer.getVirtualItems().map((vItem) => {
+              const i = vItem.index;
+              const track = queue[i];
               const isDragged = dragIdx === i;
               const showDropAbove =
                 dragIdx !== null && dropIdx === i && dragIdx > i;
@@ -239,15 +251,18 @@ const QueueTab = memo(function QueueTab() {
               return (
                 <div
                   key={`queue-${track.id}-${i}`}
+                  data-index={i}
+                  ref={virtualizer.measureElement}
                   draggable
                   onDragStart={(e) => handleDragStart(e, i)}
                   onDragOver={(e) => handleDragOver(e, i)}
                   onDragLeave={handleDragLeave}
                   onDrop={(e) => handleDrop(e, i)}
                   onDragEnd={handleDragEnd}
-                  className={`relative flex items-center gap-1 rounded-md transition-opacity duration-150 ${
+                  className={`absolute left-0 right-0 flex items-center gap-1 rounded-md transition-opacity duration-150 ${
                     isDragged ? "opacity-30" : "opacity-100"
                   }`}
+                  style={{ top: 0, transform: `translateY(${vItem.start}px)` }}
                 >
                   {/* Drop indicator line — above */}
                   {showDropAbove && (
@@ -735,7 +750,7 @@ const LyricsLine = memo(function LyricsLine({
   );
 });
 
-function LyricsTab({ isVisible }: { isVisible: boolean }) {
+const LyricsTab = memo(function LyricsTab() {
   const currentTrack = useAtomValue(currentTrackAtom);
   const isPlaying = useAtomValue(isPlayingAtom);
   const { getPlaybackPosition } = usePlaybackActions();
@@ -802,9 +817,9 @@ function LyricsTab({ isVisible }: { isVisible: boolean }) {
     return () => el.removeEventListener("scroll", onScroll);
   }, [lrcLines]);
 
-  // Sync active line with playback position — ONLY when visible and playing
+  // Sync active line with playback position — ONLY when playing (tab unmounts when not visible)
   useEffect(() => {
-    if (lrcLines.length === 0 || !isPlaying || !isVisible) return;
+    if (lrcLines.length === 0 || !isPlaying) return;
 
     const sync = async () => {
       const pos = await getPlaybackPosition();
@@ -825,7 +840,7 @@ function LyricsTab({ isVisible }: { isVisible: boolean }) {
     sync();
     const interval = setInterval(sync, 300);
     return () => clearInterval(interval);
-  }, [lrcLines, isPlaying, isVisible, getPlaybackPosition]);
+  }, [lrcLines, isPlaying, getPlaybackPosition]);
 
   // Auto-scroll to active line (only if user hasn't scrolled)
   const scrollToLine = useCallback((idx: number) => {
@@ -934,7 +949,7 @@ function LyricsTab({ isVisible }: { isVisible: boolean }) {
       )}
     </div>
   );
-}
+});
 
 // ─── Credits Tab ─────────────────────────────────────────────────────────────
 
@@ -1228,6 +1243,20 @@ function TrackRow({
   );
 }
 
+// ─── Queue Tab Wrapper (owns the scroll container ref for virtualization) ────
+
+function QueueTabWrapper() {
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  return (
+    <div
+      ref={setScrollEl}
+      className="absolute inset-0 overflow-y-auto px-6 py-4 scrollbar-thin scrollbar-thumb-th-button scrollbar-track-transparent"
+    >
+      {scrollEl && <QueueTab scrollEl={scrollEl} />}
+    </div>
+  );
+}
+
 // ─── Main Drawer ─────────────────────────────────────────────────────────────
 
 export default function NowPlayingDrawer() {
@@ -1343,36 +1372,26 @@ export default function NowPlayingDrawer() {
             </button>
           </div>
 
-          {/* Tab content — all tabs stay mounted to preserve state; inactive ones are hidden */}
+          {/* Tab content — only active tab mounted (Vaul pattern: always mounted, CSS-controlled visibility) */}
           <div className="flex-1 overflow-hidden relative">
-            <div
-              className={`absolute inset-0 overflow-y-auto px-6 py-4 scrollbar-thin scrollbar-thumb-th-button scrollbar-track-transparent ${
-                activeTab === "queue" ? "" : "hidden"
-              }`}
-            >
-              <QueueTab />
-            </div>
-            <div
-              className={`absolute inset-0 overflow-y-auto px-6 py-4 scrollbar-thin scrollbar-thumb-th-button scrollbar-track-transparent ${
-                activeTab === "suggested" ? "" : "hidden"
-              }`}
-            >
-              <SuggestedTab />
-            </div>
-            <div
-              className={`absolute inset-0 overflow-y-auto pl-6 py-4 scrollbar-thin scrollbar-thumb-th-button scrollbar-track-transparent ${
-                activeTab === "lyrics" ? "" : "hidden"
-              }`}
-            >
-              <LyricsTab isVisible={drawerOpen && activeTab === "lyrics"} />
-            </div>
-            <div
-              className={`absolute inset-0 overflow-y-auto px-6 py-4 scrollbar-thin scrollbar-thumb-th-button scrollbar-track-transparent ${
-                activeTab === "credits" ? "" : "hidden"
-              }`}
-            >
-              <CreditsTab />
-            </div>
+            {activeTab === "queue" && (
+              <QueueTabWrapper />
+            )}
+            {activeTab === "suggested" && (
+              <div className="absolute inset-0 overflow-y-auto px-6 py-4 scrollbar-thin scrollbar-thumb-th-button scrollbar-track-transparent">
+                <SuggestedTab />
+              </div>
+            )}
+            {activeTab === "lyrics" && (
+              <div className="absolute inset-0 overflow-y-auto pl-6 py-4 scrollbar-thin scrollbar-thumb-th-button scrollbar-track-transparent">
+                <LyricsTab />
+              </div>
+            )}
+            {activeTab === "credits" && (
+              <div className="absolute inset-0 overflow-y-auto px-6 py-4 scrollbar-thin scrollbar-thumb-th-button scrollbar-track-transparent">
+                <CreditsTab />
+              </div>
+            )}
           </div>
         </div>
       </div>

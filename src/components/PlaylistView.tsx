@@ -1,6 +1,6 @@
 import { Play, Pause, Music, X, Shuffle, Heart, MoreHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState, useCallback, useRef, startTransition } from "react";
-import { useAtomValue } from "jotai";
+import { useStore } from "jotai";
 import { isPlayingAtom, currentTrackAtom } from "../atoms/playback";
 import { usePlaybackActions } from "../hooks/usePlaybackActions";
 import { useFavorites } from "../hooks/useFavorites";
@@ -30,8 +30,7 @@ export default function PlaylistView({
   playlistInfo,
   onBack,
 }: PlaylistViewProps) {
-  const isPlaying = useAtomValue(isPlayingAtom);
-  const currentTrack = useAtomValue(currentTrackAtom);
+  const store = useStore();
   const { playTrack, setQueueTracks, pauseTrack, resumeTrack } =
     usePlaybackActions();
 
@@ -191,6 +190,8 @@ export default function PlaylistView({
   const handlePlayAll = async () => {
     if (tracks.length === 0) return;
 
+    const currentTrack = store.get(currentTrackAtom);
+    const isPlaying = store.get(isPlayingAtom);
     if (currentTrack && trackIds.has(currentTrack.id)) {
       if (isPlaying) {
         await pauseTrack();
@@ -238,7 +239,10 @@ export default function PlaylistView({
     }
   };
 
-  const playlistPlaying = !!(currentTrack && trackIds.has(currentTrack.id) && isPlaying);
+  const playlistPlaying = (() => {
+    const ct = store.get(currentTrackAtom);
+    return !!(ct && trackIds.has(ct.id) && store.get(isPlayingAtom));
+  })();
 
   // Favorite state — driven by atom for instant updates everywhere
   const { favoritePlaylistUuids, addFavoritePlaylist, removeFavoritePlaylist } = useFavorites();
