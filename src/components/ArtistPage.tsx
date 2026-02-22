@@ -26,6 +26,7 @@ import {
   buildMediaItem,
 } from "../utils/itemHelpers";
 import { useMediaPlay } from "../hooks/useMediaPlay";
+import BioText, { stripBio } from "./BioText";
 
 interface ArtistPageProps {
   artistId: number;
@@ -34,18 +35,6 @@ interface ArtistPageProps {
 }
 
 
-
-/** Strip Tidal's wimpLink markup and HTML tags from bio text */
-function cleanBio(raw: string): string {
-  return (
-    raw
-      .replace(/\[wimpLink[^\]]*\]/g, "")
-      .replace(/\[\/wimpLink\]/g, "")
-      .replace(/\[[^\]]*\]/g, "")
-      .replace(/<[^>]*>/g, "")
-      .trim()
-  );
-}
 
 export default function ArtistPage({
   artistId,
@@ -325,7 +314,7 @@ export default function ArtistPage({
           {bio && (
             <div className="mt-1 max-w-[800px]">
               <p className="text-[14px] text-th-text-muted line-clamp-2">
-                {cleanBio(bio)}
+                {stripBio(bio)}
               </p>
               <button
                 onClick={() => setShowBioModal(true)}
@@ -377,17 +366,14 @@ export default function ArtistPage({
             </div>
 
             <div className="px-6 pb-6 overflow-y-auto scrollbar-thin scrollbar-thumb-th-button scrollbar-track-transparent">
-              {cleanBio(bio)
-                .split(/\n\n|\n/)
-                .filter((p) => p.trim())
-                .map((paragraph, i) => (
-                  <p
-                    key={i}
-                    className="text-[14px] text-th-text-secondary leading-[1.7] mb-4 last:mb-0"
-                  >
-                    {paragraph.trim()}
-                  </p>
-                ))}
+              <BioText
+                bio={bio}
+                onArtistClick={(id, name) => {
+                  setShowBioModal(false);
+                  navigateToArtist(id, { name });
+                }}
+                className="text-th-text-secondary"
+              />
               {bioSource && (
                 <p className="text-[12px] text-th-text-faint mt-6 italic">
                   Artist bio from {bioSource}

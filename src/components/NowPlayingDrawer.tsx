@@ -27,6 +27,7 @@ import { useFavorites } from "../hooks/useFavorites";
 import { useNavigation } from "../hooks/useNavigation";
 import { useToast } from "../contexts/ToastContext";
 import { getTrackRadio, getTrackLyrics, getTrackCredits, getArtistBio } from "../api/tidal";
+import BioText from "./BioText";
 import {
   getTidalImageUrl,
   type Track,
@@ -968,48 +969,6 @@ function SkeletonRow({ first = false }: { first?: boolean }) {
   );
 }
 
-type BioSegment =
-  | { type: "text"; text: string }
-  | { type: "link"; artistId: number; text: string };
-
-function parseSegments(text: string): BioSegment[] {
-  const segments: BioSegment[] = [];
-  const re = /\[wimpLink\s+artistId="(\d+)"\](.*?)\[\/wimpLink\]/g;
-  let last = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = re.exec(text)) !== null) {
-    if (match.index > last) {
-      segments.push({ type: "text", text: text.slice(last, match.index) });
-    }
-    segments.push({
-      type: "link",
-      artistId: parseInt(match[1], 10),
-      text: match[2],
-    });
-    last = re.lastIndex;
-  }
-
-  if (last < text.length) {
-    segments.push({ type: "text", text: text.slice(last) });
-  }
-
-  // Strip remaining [bracket] tags and <html> tags from text segments
-  return segments.map((seg) =>
-    seg.type === "text"
-      ? { ...seg, text: seg.text.replace(/\[[^\]]*\]/g, "").replace(/<[^>]*>/g, "") }
-      : seg
-  );
-}
-
-function parseBio(raw: string): BioSegment[][] {
-  const normalized = raw.replace(/<br\s*\/?>/gi, "\n");
-  return normalized
-    .split(/\n\n|\n/)
-    .filter((p) => p.trim())
-    .map((paragraph) => parseSegments(paragraph.trim()));
-}
-
 const CreditsTab = memo(function CreditsTab() {
   const currentTrack = useAtomValue(currentTrackAtom);
   const { navigateToArtist } = useNavigation();
@@ -1086,9 +1045,6 @@ const CreditsTab = memo(function CreditsTab() {
         return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
       })()
     : null;
-  const bioParagraphs = bio ? parseBio(bio) : null;
-  const hasBioContent = bioParagraphs && bioParagraphs.length > 0;
-
   if (hasNoCredits && !bioLoading && !bio) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-th-text-disabled">
@@ -1145,29 +1101,10 @@ const CreditsTab = memo(function CreditsTab() {
           <SkeletonBar className="h-4 w-3/4" />
         </div>
       )}
-      {!bioLoading && bioParagraphs && hasBioContent && (
+      {!bioLoading && bio && (
         <div className="flex flex-col pt-6 mt-2">
           <h3 className="text-[16px] font-bold text-white mb-3">Bio</h3>
-          {bioParagraphs.map((segments, pi) => (
-            <p
-              key={pi}
-              className="text-[14px] text-white/80 leading-[1.7] mb-4 last:mb-0"
-            >
-              {segments.map((seg, si) =>
-                seg.type === "link" ? (
-                  <button
-                    key={si}
-                    className="underline decoration-white/40 underline-offset-2 hover:decoration-white/80 transition-colors"
-                    onClick={() => handleArtistLink(seg.artistId, seg.text)}
-                  >
-                    {seg.text}
-                  </button>
-                ) : (
-                  <span key={si}>{seg.text}</span>
-                )
-              )}
-            </p>
-          ))}
+          <BioText bio={bio} onArtistClick={handleArtistLink} className="text-white/80" />
         </div>
       )}
     </div>
