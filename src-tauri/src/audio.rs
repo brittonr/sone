@@ -214,7 +214,10 @@ fn spawn_alsa_writer(
                             Err(e) if e.errno() == libc::EAGAIN => {
                                 std::thread::sleep(std::time::Duration::from_millis(10));
                             }
-                            Err(_) => break,
+                            Err(_) => {
+                                if pcm.prepare().is_ok() { recovered = true; }
+                                break;
+                            }
                         }
                     }
                     recovered
@@ -565,7 +568,7 @@ impl AudioPlayer {
                                     PlaybackBackend::Normal { pipeline, user_volume_el, .. } => {
                                         // Normal mode: fade + EOS drain (unchanged)
                                         if let Some(ref vol) = user_volume_el {
-                                            for i in (0..10).rev() {
+                                            for i in (0..=10).rev() {
                                                 vol.set_property("volume", current_volume * (i as f64 / 10.0));
                                                 std::thread::sleep(std::time::Duration::from_millis(10));
                                             }
@@ -677,6 +680,7 @@ impl AudioPlayer {
                                     let app_handle_clone = app_handle.clone();
                                     let writer_tx_bus = wtx;
                                     let bus_gen = Arc::clone(&writer_gen);
+                                    let tearing_down_bus = Arc::clone(&tearing_down);
                                     if let Some(bus) = pipe.bus() {
                                         std::thread::spawn(move || {
                                             for msg in bus.iter_timed(gst::ClockTime::NONE) {
@@ -698,15 +702,17 @@ impl AudioPlayer {
                                                             "GStreamer error: {} (debug: {})",
                                                             err_msg, debug_str
                                                         );
-                                                        app_handle_clone.emit("audio-error",
-                                                            serde_json::json!({
-                                                                "kind": "playback_error",
-                                                                "message": err_msg
-                                                            })
-                                                        ).ok();
                                                         eos_flag.store(true, Ordering::SeqCst);
+                                                        if !tearing_down_bus.load(Ordering::SeqCst) {
+                                                            app_handle_clone.emit("audio-error",
+                                                                serde_json::json!({
+                                                                    "kind": "playback_error",
+                                                                    "message": err_msg
+                                                                })
+                                                            ).ok();
+                                                        }
                                                         writer_tx_bus.send(WriterCommand::EndOfTrack {
-                                                            emit_finished: true,
+                                                            emit_finished: false,
                                                             generation: bus_gen.load(Ordering::Acquire),
                                                         }).ok();
                                                         break;
@@ -803,15 +809,14 @@ impl AudioPlayer {
                                                         "GStreamer error: {} (debug: {})",
                                                         err_msg, debug_str
                                                     );
-                                                    let is_busy = err_msg.contains("busy") || debug_str.contains("busy")
-                                                        || err_msg.contains("EBUSY") || debug_str.contains("EBUSY");
-                                                    let kind = if is_busy { "device_busy" } else { "playback_error" };
-                                                    app_handle_clone.emit("audio-error",
-                                                        serde_json::json!({ "kind": kind, "message": err_msg })
-                                                    ).ok();
                                                     eos_flag.store(true, Ordering::SeqCst);
                                                     if !tearing_down_flag.load(Ordering::SeqCst) {
-                                                        app_handle_clone.emit("track-finished", ()).ok();
+                                                        let is_busy = err_msg.contains("busy") || debug_str.contains("busy")
+                                                            || err_msg.contains("EBUSY") || debug_str.contains("EBUSY");
+                                                        let kind = if is_busy { "device_busy" } else { "playback_error" };
+                                                        app_handle_clone.emit("audio-error",
+                                                            serde_json::json!({ "kind": kind, "message": err_msg })
+                                                        ).ok();
                                                     }
                                                     break;
                                                 }
