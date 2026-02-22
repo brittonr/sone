@@ -137,6 +137,16 @@ fn configure_alsa_hwparams(
     }
     hwp.set_rate(fmt.sample_rate, ValueOr::Nearest)
         .map_err(|e| format!("set_rate({}): {e}", fmt.sample_rate))?;
+    if bit_perfect {
+        let actual_rate = hwp.get_rate()
+            .map_err(|e| format!("get_rate: {e}"))?;
+        if actual_rate != fmt.sample_rate {
+            return Err(format!(
+                "Bit-perfect: DAC negotiated {}Hz but track requires {}Hz",
+                actual_rate, fmt.sample_rate
+            ));
+        }
+    }
     hwp.set_channels(fmt.channels)
         .map_err(|e| format!("set_channels({}): {e}", fmt.channels))?;
     hwp.set_buffer_time_near(500_000, ValueOr::Nearest)
@@ -583,7 +593,7 @@ impl AudioPlayer {
                                         track_generation += 1;
                                         writer_gen.store(track_generation, Ordering::Release);
                                         if let Some(ref tx) = writer_tx {
-                                            tx.try_send(WriterCommand::Flush).ok();
+                                            let _ = tx.send(WriterCommand::Flush);
                                         }
                                         if let Some(bus) = pipeline.bus() {
                                             bus.set_flushing(true);
@@ -927,7 +937,7 @@ impl AudioPlayer {
                                 track_generation += 1;
                                 writer_gen.store(track_generation, Ordering::Release);
                                 if let Some(ref tx) = writer_tx {
-                                    tx.try_send(WriterCommand::Flush).ok();
+                                    let _ = tx.send(WriterCommand::Flush);
                                 }
                                 let pos = gst::ClockTime::from_nseconds(
                                     (position_secs as f64 * 1_000_000_000.0) as u64,
