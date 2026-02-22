@@ -236,6 +236,7 @@ fn spawn_alsa_writer(
                         io.writei(&data[offset..])
                     }; // io dropped here — flag cleared before any recovery
                     match result {
+                        Ok(0) => break, // sub-frame remnant
                         Ok(frames) => {
                             offset += frames * frame_size;
                             fw.fetch_add(frames as u64, Ordering::Relaxed);
@@ -259,7 +260,7 @@ fn spawn_alsa_writer(
                 Ok(())
             }
 
-            fn write_silence(pcm: &alsa::PCM, buf: &[u8]) {
+            fn write_silence(pcm: &alsa::PCM, buf: &[u8]) -> bool {
                 let result = {
                     let io = pcm.io_bytes();
                     io.writei(buf)
@@ -270,8 +271,12 @@ fn spawn_alsa_writer(
                         let io = pcm.io_bytes();
                         let _ = io.writei(buf);
                     }
-                    Err(e) => { log::error!("[alsa-writer] silence write error: {e}"); }
+                    Err(e) => {
+                        log::error!("[alsa-writer] silence write error: {e}");
+                        return false;
+                    }
                 }
+                true
             }
 
             /// Close and reopen ALSA device with new format.
@@ -323,7 +328,12 @@ fn spawn_alsa_writer(
                                     std::thread::sleep(std::time::Duration::from_millis(50));
                                 } else {
                                     // SW pause: blocking writei paces the thread (~50ms per period)
-                                    write_silence(&pcm, &silence_buf);
+                                    if !write_silence(&pcm, &silence_buf) {
+                                        app_handle.emit("audio-error",
+                                            serde_json::json!({ "kind": "device_disconnected" })).ok();
+                                        tearing_down.store(true, Ordering::SeqCst);
+                                        break 'main;
+                                    }
                                 }
                             }
 
@@ -352,12 +362,14 @@ fn spawn_alsa_writer(
                                 Err(e) => {
                                     log::error!("[alsa-writer] reopen failed: {e}");
                                     app_handle.emit("audio-error", serde_json::json!({ "kind": "format_change_failed" })).ok();
+                                    tearing_down.store(true, Ordering::SeqCst);
                                     return; // pcm already dropped, just exit thread
                                 }
                             }
                         }
                         if let Err(kind) = write_bytes(&pcm, &chunk.data, &current_fmt, &frames_written, &silence_buf) {
                             app_handle.emit("audio-error", serde_json::json!({ "kind": kind })).ok();
+                            tearing_down.store(true, Ordering::SeqCst);
                             break;
                         }
                     }
@@ -374,6 +386,7 @@ fn spawn_alsa_writer(
                                 Err(e) => {
                                     log::error!("[alsa-writer] reopen for format hint failed: {e}");
                                     app_handle.emit("audio-error", serde_json::json!({ "kind": "format_change_failed" })).ok();
+                                    tearing_down.store(true, Ordering::SeqCst);
                                     return;
                                 }
                             }
@@ -385,7 +398,12 @@ fn spawn_alsa_writer(
                             continue; // stale EOS from old pipeline
                         }
                         let got_shutdown = drain_writer_rx(&rx);
-                        write_silence(&pcm, &silence_buf);
+                        if !write_silence(&pcm, &silence_buf) {
+                            app_handle.emit("audio-error",
+                                serde_json::json!({ "kind": "device_disconnected" })).ok();
+                            tearing_down.store(true, Ordering::SeqCst);
+                            break 'main;
+                        }
 
                         if emit_finished && !tearing_down.load(Ordering::SeqCst) {
                             log::debug!("[alsa-writer] emitting track-finished");
@@ -397,7 +415,12 @@ fn spawn_alsa_writer(
                         // Idle silence loop — keep DAC clock alive between tracks
                         log::debug!("[alsa-writer] entering idle silence loop");
                         loop {
-                            write_silence(&pcm, &silence_buf);
+                            if !write_silence(&pcm, &silence_buf) {
+                                app_handle.emit("audio-error",
+                                    serde_json::json!({ "kind": "device_disconnected" })).ok();
+                                tearing_down.store(true, Ordering::SeqCst);
+                                break 'main;
+                            }
                             match rx.try_recv() {
                                 Ok(WriterCommand::Data(chunk)) => {
                                     if chunk.generation < writer_gen.load(Ordering::Acquire) {
@@ -467,7 +490,12 @@ fn spawn_alsa_writer(
                     }
 
                     Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                        write_silence(&pcm, &silence_buf);
+                        if !write_silence(&pcm, &silence_buf) {
+                            app_handle.emit("audio-error",
+                                serde_json::json!({ "kind": "device_disconnected" })).ok();
+                            tearing_down.store(true, Ordering::SeqCst);
+                            break 'main;
+                        }
                     }
 
                     Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
@@ -573,15 +601,20 @@ impl AudioPlayer {
                                                 std::thread::sleep(std::time::Duration::from_millis(10));
                                             }
                                         }
-                                        pipeline.send_event(gst::event::Eos::new());
-                                        eos.store(false, Ordering::SeqCst);
-                                        let start = std::time::Instant::now();
-                                        while !eos.load(Ordering::SeqCst)
-                                            && start.elapsed() < std::time::Duration::from_millis(500)
-                                        {
-                                            std::thread::sleep(std::time::Duration::from_millis(10));
+                                        if !eos.load(Ordering::SeqCst) {
+                                            // Mid-track skip — need to drain
+                                            pipeline.send_event(gst::event::Eos::new());
+                                            eos.store(false, Ordering::SeqCst);
+                                            let start = std::time::Instant::now();
+                                            while !eos.load(Ordering::SeqCst)
+                                                && start.elapsed() < std::time::Duration::from_millis(500)
+                                            {
+                                                std::thread::sleep(std::time::Duration::from_millis(10));
+                                            }
+                                            log::debug!("[audio] teardown normal: EOS drain {:?}", start.elapsed());
+                                        } else {
+                                            log::debug!("[audio] teardown normal: skipping drain (already EOS)");
                                         }
-                                        log::debug!("[audio] teardown normal: EOS drain {:?}", start.elapsed());
                                         if let Some(bus) = pipeline.bus() {
                                             bus.set_flushing(true);
                                         }
@@ -606,9 +639,9 @@ impl AudioPlayer {
                                     }
                                 }
 
-                                tearing_down.store(false, Ordering::SeqCst);
                                 log::debug!("[audio] teardown: complete");
                             }
+                            tearing_down.store(false, Ordering::SeqCst);
                             eos.store(false, Ordering::SeqCst);
                             has_uri.store(true, Ordering::SeqCst);
                             frames_written.store(0, Ordering::Relaxed);
@@ -906,7 +939,16 @@ impl AudioPlayer {
                                 has_uri.store(false, Ordering::SeqCst);
                                 Ok(())
                             }
-                            None => Ok(()),
+                            None => {
+                                // Clean up orphaned writer (e.g. pipeline build failed after spawn)
+                                if let Some(tx) = writer_tx.take() {
+                                    let _ = tx.send(WriterCommand::Shutdown);
+                                }
+                                if let Some(h) = writer_thread.take() {
+                                    h.join().ok();
+                                }
+                                Ok(())
+                            }
                         };
                         reply.send(result).ok();
                     }
