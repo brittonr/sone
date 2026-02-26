@@ -19,4 +19,18 @@ writeFileSync(
   cargo.replace(/^version = "[^"]+"/m, `version = "${version}"`)
 );
 
-console.log(`Synced version ${version} → tauri.conf.json, Cargo.toml`);
+// PKGBUILD
+try {
+  const pkgbuild = readFileSync("build-scripts/build/PKGBUILD", "utf8");
+  writeFileSync(
+    "build-scripts/build/PKGBUILD",
+    pkgbuild.replace(/^pkgver=.+$/m, `pkgver=${version}`)
+  );
+  console.log(
+    `Synced version ${version} → tauri.conf.json, Cargo.toml, PKGBUILD`
+  );
+} catch (e) {
+  if (e.code !== "ENOENT") throw e;
+  console.log(`Synced version ${version} → tauri.conf.json, Cargo.toml`);
+  console.warn("PKGBUILD not found, skipping");
+}
