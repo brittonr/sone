@@ -667,6 +667,14 @@ impl AudioPlayer {
                                         bytes_per_sample: 4,
                                     };
 
+                                    // Bump generation again: the old appsink may have
+                                    // pushed chunks (stamped gen N+1) from its internal
+                                    // queue between the Flush and set_state(Null).
+                                    // Gen N+2 causes the writer to discard them instantly
+                                    // instead of writing each to ALSA at audio rate (~85ms).
+                                    track_generation += 1;
+                                    writer_gen.store(track_generation, Ordering::Release);
+
                                     // Reuse writer if alive, otherwise spawn new one
                                     let writer_alive = writer_thread.as_ref()
                                         .map(|h| !h.is_finished())
