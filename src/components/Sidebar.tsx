@@ -17,6 +17,7 @@ import {
 } from "../types";
 import TidalImage from "./TidalImage";
 import MediaContextMenu from "./MediaContextMenu";
+import { CreatePlaylistModal } from "./AddToPlaylistMenu";
 import { useState, useCallback, useMemo } from "react";
 import { useAtomValue } from "jotai";
 import { userPlaylistsAtom, favoritePlaylistsAtom } from "../atoms/playlists";
@@ -147,6 +148,9 @@ export default function Sidebar() {
     pageSize: 20,
     enabled: activeFilter === "artists" && !!authTokens?.user_id,
   });
+
+  // Create playlist modal state
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -305,7 +309,10 @@ export default function Sidebar() {
                 <p className="text-th-text-muted text-sm">
                   Create your first playlist
                 </p>
-                <button className="mt-4 px-4 py-2 bg-white text-black rounded-full text-sm font-bold hover:scale-105 transition-transform">
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="mt-4 px-4 py-2 bg-white text-black rounded-full text-sm font-bold hover:scale-105 transition-transform"
+                >
                   Create playlist
                 </button>
               </div>
@@ -634,6 +641,15 @@ export default function Sidebar() {
           item={contextMenu.item}
           cursorPosition={contextMenu.position}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* Create playlist modal */}
+      {showCreateModal && (
+        <CreatePlaylistModal
+          trackIds={[]}
+          onClose={() => setShowCreateModal(false)}
+          onCreated={() => setShowCreateModal(false)}
         />
       )}
     </div>

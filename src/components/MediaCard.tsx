@@ -19,6 +19,10 @@ interface MediaCardProps {
   widthClass?: string;
   /** Pass current user ID to show "By You" for own playlists */
   userId?: number;
+  /** Override the displayed title */
+  titleOverride?: string;
+  /** Custom image element to render instead of the default img/fallback */
+  imageOverride?: React.ReactNode;
 }
 
 export default function MediaCard({
@@ -33,9 +37,11 @@ export default function MediaCard({
   showPlayButton = true,
   widthClass,
   userId,
+  titleOverride,
+  imageOverride,
 }: MediaCardProps) {
   const image = getItemImage(item);
-  const title = getItemTitle(item);
+  const title = titleOverride || getItemTitle(item);
   const subtitle = getItemSubtitle(item, userId);
 
   return (
@@ -52,7 +58,9 @@ export default function MediaCard({
           isArtist ? "rounded-full" : "rounded-md"
         }`}
       >
-        {image ? (
+        {imageOverride ? (
+          imageOverride
+        ) : image ? (
           <img
             src={image}
             alt={title}

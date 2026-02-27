@@ -38,7 +38,7 @@ function pushRecentPlaylistId(playlistId: string) {
 
 // ─── Create-playlist modal ─────────────────────────────────────
 
-function CreatePlaylistModal({
+export function CreatePlaylistModal({
   trackIds,
   onClose,
   onCreated,

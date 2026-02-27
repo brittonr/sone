@@ -14,6 +14,7 @@ import {
   getItemId,
   isArtistItem,
   isMixItem,
+  isMyTracksItem,
 } from "../utils/itemHelpers";
 
 // Simple in-memory cache to prevent skeleton flash on navigation
@@ -55,6 +56,7 @@ export default function Home() {
     (e: React.MouseEvent, item: any) => {
       e.preventDefault();
       e.stopPropagation();
+      if (isMyTracksItem(item)) return;
       let mediaItem: MediaItemType | null = null;
 
       if (isMixItem(item, "SHORTCUT_LIST")) {
@@ -108,6 +110,10 @@ export default function Home() {
 
   const handleShortcutClick = useCallback(
     (item: any) => {
+      if (isMyTracksItem(item)) {
+        navigateToFavorites();
+        return;
+      }
       if (isMixItem(item, "SHORTCUT_LIST")) {
         const mixId = item.mixId || item.id?.toString();
         if (mixId) {
@@ -141,7 +147,7 @@ export default function Home() {
         });
       }
     },
-    [navigateToPlaylist, navigateToAlbum, navigateToArtist, navigateToMix],
+    [navigateToFavorites, navigateToPlaylist, navigateToAlbum, navigateToArtist, navigateToMix],
   );
 
   useEffect(() => {
@@ -254,7 +260,7 @@ export default function Home() {
     ? (Array.isArray(shortcutSection.items)
         ? shortcutSection.items
         : []
-      ).filter((item: any) => getItemTitle(item) !== "My Tracks")
+      ).filter((item: any) => !isMyTracksItem(item))
     : [];
   const contentSections = sections.filter(
     (s) => s.sectionType !== "SHORTCUT_LIST",

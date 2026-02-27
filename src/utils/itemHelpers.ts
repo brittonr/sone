@@ -140,6 +140,16 @@ export function isMixItem(item: any, sectionType?: string): boolean {
   );
 }
 
+/** Detect the special "My Tracks" shortcut from Tidal's v2 feed. */
+export function isMyTracksItem(item: any): boolean {
+  return (
+    getItemTitle(item) === "My Tracks" &&
+    !item.uuid &&
+    !item.mixId &&
+    !item.cover
+  );
+}
+
 /** Convert a raw API item into a typed MediaItemType for playback/context menu use. */
 export function buildMediaItem(
   item: any,
