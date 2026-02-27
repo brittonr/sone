@@ -629,12 +629,16 @@ impl AudioPlayer {
                                         track_generation += 1;
                                         writer_gen.store(track_generation, Ordering::Release);
                                         if let Some(ref tx) = writer_tx {
-                                            let _ = tx.send(WriterCommand::Flush);
+                                            let _ = tx.send_timeout(
+                                                WriterCommand::Flush,
+                                                std::time::Duration::from_millis(200),
+                                            );
                                         }
                                         if let Some(bus) = pipeline.bus() {
                                             bus.set_flushing(true);
                                         }
                                         pipeline.set_state(gst::State::Null).ok();
+                                        let _ = pipeline.state(gst::ClockTime::from_mseconds(500));
                                         drop(pipeline);
                                     }
                                 }
@@ -929,9 +933,14 @@ impl AudioPlayer {
                                     bus.set_flushing(true);
                                 }
                                 if let Some(tx) = writer_tx.take() {
-                                    let _ = tx.send(WriterCommand::Shutdown);
+                                    let _ = tx.send_timeout(
+                                        WriterCommand::Shutdown,
+                                        std::time::Duration::from_millis(200),
+                                    );
                                 }
                                 pipeline.set_state(gst::State::Null).ok();
+                                let _ = pipeline.state(gst::ClockTime::from_mseconds(500));
+                                drop(pipeline);
                                 if let Some(h) = writer_thread.take() {
                                     h.join().ok();
                                 }
@@ -984,7 +993,10 @@ impl AudioPlayer {
                                 track_generation += 1;
                                 writer_gen.store(track_generation, Ordering::Release);
                                 if let Some(ref tx) = writer_tx {
-                                    let _ = tx.send(WriterCommand::Flush);
+                                    let _ = tx.send_timeout(
+                                        WriterCommand::Flush,
+                                        std::time::Duration::from_millis(200),
+                                    );
                                 }
                                 let pos = gst::ClockTime::from_nseconds(
                                     (position_secs as f64 * 1_000_000_000.0) as u64,
